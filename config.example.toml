@@ -1,71 +1,141 @@
-# news-mcp configuration example
+# ═══════════════════════════════════════════════════════════════════════════════
+# News MCP Server — Example Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-# Place this file at ~/.hermes/news-mcp.toml (or pass via --config path).
+# Copy this file to your config location (e.g. ~/.hermes/news-mcp.toml or
+# specify with `--config` on startup). All settings have sensible defaults.
 #
-# All sections with defaults can be omitted. Only the `[feeds.*]` sections
-# you actually want to add or override need to be present.
-# If no config file is found, the built-in defaults (TechCrunch, ScienceDaily,
-# China News, NewsNow hot lists) are used automatically.
+# Environment variables override config values at runtime:
+#   NEWS_MCP_PORT    — server port
+#   NEWS_MCP_HOST    — server host
+#   NEWS_MCP_LOG_LEVEL — log level
+#   NEWS_MCP_INTERVAL  — poll interval in seconds
+#   NEWS_MCP_TRANSPORT — transport mode (stdio/http/sse/hybrid)
 
-# ── Server ──────────────────────────────────────────────────────────────
+# ── Server ───────────────────────────────────────────────────────────────────
 [server]
 name = "news-mcp"
 version = "0.1.0"
 host = "127.0.0.1"
 port = 8080
-transport_mode = "stdio"   # stdio | http | sse | hybrid
+transport_mode = "stdio"
 
-# ── Poller ──────────────────────────────────────────────────────────────
-[poller]
-enabled = true              # background polling
-interval_secs = 3600        # 1 hour
-
-# ── Cache ──────────────────────────────────────────────────────────────
+# ── Cache ────────────────────────────────────────────────────────────────────
 [cache]
 max_articles_per_category = 100
 
-# ── Article Content Fetch ──────────────────────────────────────────────
+# ── Poller ───────────────────────────────────────────────────────────────────
+# Background poller refetches all feeds on an interval and keeps the cache warm.
+[poller]
+enabled = true
+interval_secs = 600          # 10 min — good for security feeds
+
+# ── Article Content Fetcher ──────────────────────────────────────────────────
 [article_fetch]
 fetch_timeout_secs = 10
 
-# ── Logging ────────────────────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────
 [logging]
 level = "info"
 enable_console = true
 
-# ── Custom Feed Sources ─────────────────────────────────────────────────
+# ── Custom Feeds ─────────────────────────────────────────────────────────────
+# Define your own RSS/Atom feeds here. Each key becomes a category name
+# available via the `get_news` MCP tool.
 #
-# Each key under [feeds] becomes a custom NewsCategory.
-# - key must be lowercase, alphanumeric + hyphens/underscores
-# - display_name and description are optional
-# - urls: list of RSS/Atom feed URLs
-# - enabled: true/false
+#   [feeds.<name>]
+#   display_name = "..."     # Human-readable name (shown to user)
+#   description = "..."      # Optional description
+#   enabled = true/false     # Show/hide from tool schema
+#   urls = ["...", "..."]    # RSS/Atom feed URLs (fetched in parallel)
 #
-# After adding a feed here it becomes available in get_news/get_categories
-# and the poller fetches it on every cycle.
-#
-# Examples:
+# ── CVE / Security Feeds ────────────────────────────────────────────────────
 
-[feeds.cve-redhat]
-display_name = "Red Hat CVE"
-description = "Red Hat Security Advisories"
-urls = ["https://access.redhat.com/security/data/metrics/cve-daily.xml"]
+[feeds.cisa]
+display_name = "CISA Alerts"
+description = "CISA Known Exploited Vulnerabilities — US Cybersecurity & Infrastructure Security Agency"
 enabled = true
+urls = ["https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.xml"]
 
-[feeds.cve-debian]
-display_name = "Debian Security"
-description = "Debian Security Bug Tracker"
-urls = ["https://www.debian.org/security/dsa"]
-enabled = true
-
-[feeds.cve-ubuntu]
+[feeds.ubuntu_security]
 display_name = "Ubuntu Security"
-description = "Ubuntu Security Notices"
-urls = ["https://ubuntu.com/security/notices/rss.xml"]
+description = "Ubuntu security advisories and CVE notifications"
 enabled = true
+urls = ["https://lists.ubuntu.com/archives/ubuntu-security-announce/feed.xml"]
 
-[feeds.cve-arch]
-display_name = "Arch Linux CVEs"
-description = "Arch Linux Security Advisories"
-urls = ["https://security.archlinux.org/"]
+[feeds.debian_security]
+display_name = "Debian Security"
+description = "Debian security advisories — DSA notifications"
 enabled = true
+urls = ["https://lists.debian.org/debian-security-announce/feed.xml"]
+
+[feeds.redhat_security]
+display_name = "Red Hat Security"
+description = "Red Hat security advisories and CVE notifications"
+enabled = true
+urls = ["https://access.redhat.com/security/data/certificates/rss.xml"]
+
+[feeds.thehackernews]
+display_name = "The Hacker News"
+description = "The Hacker News — cybersecurity news and analysis"
+enabled = true
+urls = ["https://feeds.feedburner.com/TheHackerNews"]
+
+[feeds.opennet]
+display_name = "OpenNET Security"
+description = "OpenNET — security and Linux news (KOI8-R encoding, auto-detected)"
+enabled = true
+urls = ["https://www.opennet.ru/opennews/opennews_all.rss"]
+
+[feeds.bleeping_computer]
+display_name = "BleepingComputer"
+description = "BleepingComputer — technology news, security, and malware analysis"
+enabled = true
+urls = ["https://www.bleepingcomputer.com/feed/"]
+
+[feeds.nist_nvd]
+display_name = "NIST NVD"
+description = "National Vulnerability Database — official CVE feed (recent 20 CVEs)"
+enabled = true
+urls = ["https://nvd.nist.gov/feeds/xml/cve-2.0/known.xml"]
+
+# ── Tech / General News ──────────────────────────────────────────────────────
+
+[feeds.techcrunch]
+display_name = "TechCrunch"
+description = "TechCrunch — startup and technology news"
+enabled = true
+urls = ["https://techcrunch.com/feed/"]
+
+[feeds.arstechnica]
+display_name = "Ars Technica"
+description = "Ars Technica — technology, science, and policy"
+enabled = true
+urls = ["https://feeds.arstechnica.com/arstechnica/index"]
+
+[feeds.theverge]
+display_name = "The Verge"
+description = "The Verge — technology, science, art, and culture"
+enabled = true
+urls = ["https://www.theverge.com/rss/index.xml"]
+
+[feeds.sciencedaily]
+display_name = "ScienceDaily"
+description = "ScienceDaily — science news"
+enabled = true
+urls = ["https://www.sciencedaily.com/rss/all.xml"]
+
+[feeds.phoronix]
+display_name = "Phoronix"
+description = "Phoronix — Linux hardware reviews, benchmark, and open-source news"
+enabled = true
+urls = ["https://www.phoronix.com/rss.php"]
+
+# ── Disabled Examples ────────────────────────────────────────────────────────
+# Set enabled = false to keep a feed in config without exposing it in MCP tools:
+
+[feeds.lwn]
+display_name = "LWN (disabled)"
+description = "Linux Weekly News — kernel and free software development"
+enabled = false
+urls = ["https://lwn.net/headlines/newrss"]

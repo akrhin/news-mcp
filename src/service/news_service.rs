@@ -41,7 +41,7 @@ impl NewsService {
     /// Get feed URLs for a category, using config if available
     fn get_feed_urls_for_category(&self, category: &NewsCategory) -> Vec<String> {
         if let Some(config) = &self.config {
-            let urls = config.get_feed_urls(&category.to_string());
+            let urls = config.get_feed_urls(&category.config_key());
             if !urls.is_empty() {
                 return urls;
             }
