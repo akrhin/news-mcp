@@ -72,14 +72,13 @@ impl NewsService {
         }
 
         let content = response.bytes().await?;
-        let decoded = crate::utils::decode_xml_bytes(&content);
-        self.parse_feed(decoded.as_bytes(), category)
+        self.parse_feed(&content, category)
     }
 
     /// Parse RSS/Atom feed content into articles
     pub fn parse_feed(&self, content: &[u8], category: NewsCategory) -> Result<Vec<NewsArticle>> {
-        let feed = parser::parse(content)
-            .map_err(|e| Error::rss(format!("Failed to parse feed: {e}")))?;
+        let feed =
+            parser::parse(content).map_err(|e| Error::rss(format!("Failed to parse feed: {e}")))?;
 
         // Clone the feed title before the closure to avoid move issues
         let feed_title = feed.title.clone();

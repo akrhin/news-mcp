@@ -10,6 +10,8 @@ use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 /// Detect encoding from XML declaration (<?xml encoding="..."?>) and
 /// re-encode raw bytes to UTF-8 String. Searches at byte level so non-UTF-8
 /// encodings (KOI8-R, Windows-1251, GB2312, etc.) don't corrupt the search.
+/// Also rewrites the XML declaration to "UTF-8" so downstream parsers (feed-rs)
+/// don't try to double-decode already-transcoded bytes.
 pub fn decode_xml_bytes(raw: &[u8]) -> String {
     // Search for b"encoding=" in the raw bytes (before any UTF-8 conversion)
     if let Some(enc_start) = raw.windows(9).position(|w| w == b"encoding=") {
@@ -25,13 +27,21 @@ pub fn decode_xml_bytes(raw: &[u8]) -> String {
                 if let Some(encoding) = Encoding::for_label(enc_name) {
                     if encoding != UTF_8 {
                         let (decoded, _, _) = encoding.decode(raw);
-                        return decoded.into_owned();
+                        let mut result = decoded.into_owned();
+                        // Rewrite the XML encoding declaration to UTF-8 so
+                        // feed-rs / quick-xml don't double-decode the bytes
+                        let enc_start_utf8 = enc_start;
+                        let enc_end_utf8 = enc_start_utf8 + 9 + 1 + enc_len + 1; // "encoding=X...X"
+                                                                                 // Replace the old encoding spec with UTF-8
+                        let new_spec = format!("encoding={}UTF-8{}", quote as char, quote as char);
+                        result.replace_range(enc_start_utf8..enc_end_utf8, &new_spec);
+                        return result;
                     }
                 }
             }
         }
     }
-    // Fallback: attempt UTF-8, then fall back to lossy
+    // Fallback (no encoding declaration or already UTF-8)
     String::from_utf8_lossy(raw).into_owned()
 }
 
