@@ -1,245 +1,242 @@
-# News MCP Server Design Document
+# Architecture
 
-## 1. Project Overview
+> **Fork** of [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp).  
+> This document covers the forked version with custom feed categories and config-driven sources.
 
-**Project Name**: News MCP Server
-**Project Type**: Rust MCP (Model Context Protocol) Server
-**Core Functionality**: Fetches news from RSS feeds with background polling and in-memory caching, provides news query tools via MCP protocol
-**Target Users**: Claude Desktop users, AI assistant developers
+## Overview
 
-## 2. System Architecture
+News MCP Server is a Rust implementation of the Model Context Protocol (MCP) that fetches, caches, and serves news articles from RSS feeds. It runs as a background-polling service and exposes three MCP tools for AI assistants (Claude Desktop, etc.).
 
-```mermaid
-flowchart TB
-    subgraph Client["Client"]
-        CD["Claude Desktop"]
-    end
+### What Changed in This Fork
 
-    subgraph Server["NewsMcpServer"]
-        Transport["Transport<br/>(stdio/http/sse)"]
-        Handler["Handler"]
-        ToolRegistry["Tool Registry"]
+| Aspect | Original | This Fork |
+|--------|----------|-----------|
+| Categories | Fixed enum (30+ variants) | Enum still exists for builtins; `Custom(String)` variant for user-defined feeds |
+| Feed URLs | Hardcoded in `get_feed_urls()` | Merged from config `[feeds.*]` + built-in defaults |
+| New feeds | Requires new enum variant + code change | Just add `[feeds.my-feed]` to `config.toml` |
+| Poller startup | Blocks server startup | Starts immediately; cache fills on first poll tick |
+| NewsNow integration | Separate tool | Unified under same `get_news`/`get_categories` tools |
 
-        subgraph Tools["MCP Tools"]
-            GN["get_news"]
-            SN["search_news"]
-            HC["health_check"]
-            GC["get_categories"]
-            RN["refresh_news"]
-        end
-    end
+## Component Diagram
 
-    subgraph Core["Core Components"]
-        Cache["Cache<br/>(RwLock)"]
-        Poller["Poller<br/>(background)"]
-        NewsService["News Service<br/>(HTTP + retry)"]
-    end
-
-    subgraph Feeds["RSS Sources"]
-        Tech["TechCrunch<br/>Ars Technica<br/>The Verge"]
-        Sci["ScienceDaily"]
-        HN["Hacker News"]
-        CN["China News<br/>(21 categories)"]
-    end
-
-    CD -->|"MCP Protocol"| Transport
-    Transport --> Handler
-    Handler --> ToolRegistry
-    ToolRegistry --> Tools
-
-    Tools --> Cache
-    Poller --> Cache
-    Poller --> NewsService
-    NewsService --> Feeds
 ```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         News MCP Server                             │
+│                                                                     │
+│  ┌──────────┐  ┌──────────────┐  ┌──────────────────────────────┐  │
+│  │ Transport │─▶│  MCP Handler │─▶│      Tool Registry           │  │
+│  │(stdio/http│  │              │  │  ┌─────────┐ ┌─────────────┐ │  │
+│  │ sse/hybrid)│  │              │  │  │get_news │ │get_categories│ │  │
+│  └──────────┘  └──────────────┘  │  ├─────────┤ ├─────────────┤ │  │
+│                                  │  │get_artic│ │              │ │  │
+│                                  │  │le_content│ │              │ │  │
+│                                  │  └────▲─────┘ └──────▲──────┘ │  │
+│                                  └────────┼──────────────┼────────┘  │
+│                                           │              │          │
+│  ┌────────────────────────────────────────┴──────────────┴──────┐   │
+│  │                        Cache (RwLock)                         │   │
+│  │  HashMap<NewsCategory, Vec<NewsArticle>>                      │   │
+│  │  HashMap<NewsCategory, DateTime<Utc>>   ← lastUpdated        │   │
+│  └────────────────────────────────────────┬──────────────────────┘   │
+│                                           │                          │
+│  ┌────────────────────────────────────────┴──────────────────────┐   │
+│  │                     Background Poller                         │   │
+│  │  Fetches all categories (builtin + custom) concurrently       │   │
+│  │  on a configurable interval (default 3600s)                   │   │
+│  └────────────────────────────────────────┬──────────────────────┘   │
+│                                           │                          │
+└───────────────────────────────────────────┼──────────────────────────┘
+                                            │
+                 ┌──────────────────────────┼──────────────────────┐
+                 │                          │                      │
+         ┌───────┴──────┐          ┌────────┴────────┐            │
+         │  NewsService  │          │ NewsNowService  │  (future)  │
+         │  (RSS/Atom)   │          │  (JSON API)     │  sources   │
+         └───────┬───────┘          └────────┬────────┘            │
+                 │                          │                      │
+        ┌────────┴────────┐        ┌────────┴────────┐            │
+        │ TechCrunch      │        │ 微博热搜        │            │
+        │ Ars Technica    │        │ 百度热搜        │            │
+        │ CISA            │        │ 知乎热榜        │            │
+        │ Debian Security │        │ ...             │            │
+        │ Custom Feeds    │        └─────────────────┘            │
+        └─────────────────┘                                       │
+</pre>
 
-## 3. Core Components
+## Core Components
 
-### 3.1 Cache Layer (`src/cache/`)
+### 1. Cache Layer (`src/cache/`)
 
-**Responsibility**: In-memory cache for news articles
+In-memory article store using `RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>`.
 
-**Implementation**:
-- Uses `RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>` for thread safety
-- Supports per-category storage and retrieval
-- Full-text search across title/description
-- Configurable maximum cache size
-
-**Key Structures**:
+**Key struct — `NewsCategory`:**
 ```rust
-pub struct NewsCache {
-    articles: RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>,
-    last_updated: RwLock<HashMap<NewsCategory, DateTime<Utc>>>,
-    max_articles_per_category: usize,
+pub enum NewsCategory {
+    // Built-in categories (Technology, Science, HackerNews, 21 China News, 11 NewsNow)
+    Technology,
+    Science,
+    HackerNews,
+    Instant,
+    // ... 40+ built-in variants
+
+    /// User-defined category from config [feeds.<name>].
+    /// The string is the config key (e.g. "cisa", "thehackernews").
+    Custom(String),
 }
 ```
 
-### 3.2 Poller (`src/poller/`)
+Custom categories are parsed via `from_config_key()` — unknown keys become `Custom(key)` automatically.
 
-**Responsibility**: Background task for periodic RSS source polling
+**Cache methods:**
+- `get_category_news(&Category) -> Vec<NewsArticle>` — read articles for a category
+- `set_category_news(Category, Vec<NewsArticle>)` — write articles (truncates to `max_articles_per_category`)
+- `get_all_categories() -> Vec<(Category, usize)>` — returns builtins (with counts) + any Custom categories that have cached data
+- `search(query, Category?) -> Vec<NewsArticle>` — full-text search over title/description
 
-**Implementation**:
-- Independent async task that periodically fetches all category news
-- Uses `AtomicBool` to track initial poll completion status
-- Provides blocking `wait_for_initial_poll()` interface
-- Fetches all categories concurrently
+### 2. Background Poller (`src/poller/`)
 
-**Key Flow**:
-```mermaid
-flowchart LR
-    A[Start] --> B[Wait for Initial Poll]
-    B --> C[Enter Background Polling Loop]
-    C --> D[Fetch All Categories]
-    D --> E[Concurrent Requests]
-    E --> F[Parse RSS]
-    F --> G[Update Cache]
-    G --> H[Wait for Next Poll]
-    H --> C
-```
-
-### 3.3 Service (`src/service/`)
-
-**Responsibility**: RSS source fetching and parsing
-
-**Implementation**:
-- HTTP client using `reqwest` + `reqwest-middleware`
-- Exponential backoff retry strategy (`reqwest-retry`)
-- RSS/Atom parsing using `feed-rs`
-- Date sorting (newest first)
-
-### 3.4 Server (`src/server/`)
-
-**Responsibility**: MCP protocol implementation
-
-**Transport Modes**:
-- **stdio**: Suitable for Claude Desktop integration
-- **HTTP**: Suitable for web applications
-- **SSE**: Server-Sent Events for push
-- **hybrid**: Supports both stdio and HTTP
-
-**Key Structures**:
-```rust
-pub struct NewsMcpServer {
-    config: Config,
-    cache: NewsCache,
-    tool_registry: ToolRegistry,
-}
-
-pub struct NewsMcpHandler {
-    server: Arc<NewsMcpServer>,
-}
-```
-
-### 3.5 Tools (`src/tools/`)
-
-| Tool | Function | Parameters |
-|------|----------|------------|
-| get_news | Get news list (dynamic categories) | category, limit, format |
-| search_news | Search news (dynamic categories) | query, category, limit |
-| get_categories | Get category list | - |
-| health_check | Health check | check_type, verbose |
-| refresh_news | Manual refresh | category |
-
-**Supported Formats**: markdown, json, text
-
-**Category Feature**: The category parameter for tools is dynamically generated from config; MCP clients will see the actual available categories.
-
-## 4. Data Models
-
-### NewsCategory
-
-Supports 30+ categories (dynamically generated from config):
-- **English Categories**: Technology (TechCrunch, Ars Technica, The Verge), Science (ScienceDaily), HackerNews
-- **Chinese Categories**: Instant News, Headlines, Politics, East-West Dialogue, Society, Finance, Life, Health, Greater Bay Area, Chinese, Entertainment, Sports, Video, Photo, Creative, Live, Education, Law, United Front, Ethnic Unity, Belt and Road, Theory, ASEAN Trade
-
-### NewsArticle
+An async task that periodically calls every registered `NewsSource` and writes results into the cache.
 
 ```rust
-pub struct NewsArticle {
-    title: String,
-    description: Option<String>,
-    link: String,
-    source: String,
-    category: NewsCategory,
-    published_at: Option<DateTime<Utc>>,
-    author: Option<String>,
+pub trait NewsSource: Send + Sync {
+    fn name(&self) -> &str;
+    async fn fetch(&self) -> Result<HashMap<NewsCategory, Vec<NewsArticle>>>;
 }
 ```
 
-## 5. Configuration
+**Registered sources:**
+1. **NewsService** (`src/service/news_service.rs`) — RSS/Atom feeds
+2. **NewsNowService** (`src/service/newsnow_service.rs`) — Chinese hot lists via JSON API
 
-`config.toml`:
+The poller does **not block server startup**. The cache is initially empty; clients see 0 articles until the first poll cycle completes.
+
+### 3. NewsService (`src/service/news_service.rs`)
+
+Fetches RSS/Atom feeds. **This is where custom categories get wired in:**
+
+```rust
+async fn fetch_all_categories(&self) -> Result<HashMap<NewsCategory, Vec<NewsArticle>>> {
+    let mut categories = NewsCategory::builtin();
+
+    // Add custom categories from config
+    if let Some(config) = &self.config {
+        for key in config.feeds.keys() {
+            let cat = NewsCategory::from_config_key(key);
+            if matches!(cat, NewsCategory::Custom(_)) && !categories.contains(&cat) {
+                categories.push(cat);
+            }
+        }
+    }
+
+    // Fetch all concurrently...
+}
+```
+
+Each category gets its feed URLs from the config (or falls back to built-in defaults).
+
+### 4. NewsNowService (`src/service/newsnow_service.rs`)
+
+Fetches Chinese trending/hot lists from `newsnow.com` JSON API. 11 built-in sources. These are read-only feeds (no content fetch).
+
+### 5. Config Layer (`src/config/`)
+
+TOML-based configuration loaded at startup. Environment variables override individual fields.
+
+```toml
+[feeds.my-custom-feed]
+display_name = "My Feed"
+description = "Optional description"
+urls = ["https://example.com/rss"]
+enabled = true
+```
+
+The key (`my-custom-feed`) becomes a `NewsCategory::Custom("my-custom-feed")`.  
+`display_name` and `description` override the auto-generated ones from `NewsCategory`.
+
+### 6. Tools (`src/tools/`)
+
+Three MCP tools, all registered in `ToolRegistry`:
+
+| Tool | Function |
+|------|----------|
+| `get_news` | Fetch articles by category. Dynamic enum — custom categories appear in schema |
+| `get_categories` | List all categories (builtin + custom) with article counts |
+| `get_article_content` | Fetch full article text by ID (RSS sources only) |
+
+## Configuration Reference
+
+### Full config.toml structure
+
 ```toml
 [server]
 name = "news-mcp"
 version = "0.1.0"
 host = "127.0.0.1"
 port = 8080
-transport_mode = "http"  # stdio | http | sse | hybrid
+transport_mode = "stdio"   # stdio | http | sse | hybrid
 
 [poller]
-interval_secs = 3600
 enabled = true
+interval_secs = 3600       # seconds between poll cycles
 
 [cache]
 max_articles_per_category = 100
 
+[article_fetch]
+fetch_timeout_secs = 10
+
 [logging]
-level = "info"
+level = "info"             # trace | debug | info | warn | error
 enable_console = true
+
+# Custom feed sources — each key becomes a NewsCategory::Custom
+[feeds.my-feed]
+display_name = "My Feed"   # optional; shown in get_categories output
+description = "..."        # optional; shown in tool descriptions
+urls = ["https://.../rss"] # required: list of RSS/Atom feed URLs
+enabled = true             # optional, default: true
 ```
 
-## 6. RSS Sources
+### How categories are resolved
 
-### International News
-- **Technology**: TechCrunch, Ars Technica, The Verge
-- **Science**: ScienceDaily
+1. Built-in enum variants (Technology, Science, etc.) always exist
+2. Config keys that match a builtin alias (`tech` → Technology) resolve to the builtin
+3. Unknown config keys become `NewsCategory::Custom(key)`
+4. Custom categories appear in `get_categories` only after the first poll cycle that caches data
 
-### China News (21 categories from chinanews.com.cn)
-- Instant News, Headlines, Politics, East-West Dialogue, Society
-- Finance, Life, Health, Greater Bay Area, Chinese
-- Video, Photo, Creative, Live, Education, Law
-- United Front, Ethnic Unity, Belt and Road, Theory, ASEAN Trade
+## How to Add a New Feed (No Code)
 
-## 7. Deployment
+1. Add `[feeds.your-feed-name]` to `config.toml`
+2. Set `urls = ["https://example.com/rss"]`
+3. Restart the server
 
-### Local Run
-```bash
-./target/release/news-mcp serve --mode stdio    # Claude Desktop
-./target/release/news-mcp serve --mode http      # HTTP Server
-```
+That's it. No recompilation, no enum variants, no code changes.
 
-### Docker
-```bash
-docker build -t news-mcp .
-docker run -p 8080:8080 news-mcp
-```
+The category key (lowercase, alphanumeric + hyphens/underscores) becomes the identifier used in `get_news` calls.
 
-## 8. Testing
-
-- **Unit Tests**: Cache, service, tools, config
-- **Integration Tests**: End-to-end workflows
-- **E2E Tests**: HTTP/stdio transport modes
+## Testing
 
 ```bash
-cargo test              # All tests
-cargo test --test unit  # Unit tests
-cargo test --test e2e   # E2E tests
+cargo test                    # All tests
+cargo test --test unit        # Unit tests (cache, service, tools, config)
+cargo test --test e2e         # Integration tests (HTTP/stdio transport)
 ```
 
-## 9. Tech Stack
+66 tests total, ~1.2s runtime. Tests validate:
+- Custom category resolution from config
+- Builtin ↔ config key mapping
+- Cache read/write/search
+- Tool execution paths
+- NewsNow API deserialization
 
-- **Language**: Rust 1.75+
-- **Async**: tokio
-- **HTTP**: reqwest + reqwest-middleware
-- **RSS Parsing**: feed-rs
-- **MCP SDK**: rust-mcp-sdk
-- **Logging**: tracing + tracing-subscriber
-- **Config**: toml + serde
+## Tech Stack
 
-## 10. Extension Points
-
-1. **Add News Source**: Add in `src/utils/mod.rs` `get_feed_urls()`
-2. **Add Category**: Add to `NewsCategory` enum in `src/cache/news_cache.rs`
-3. **Add Tool**: Implement `Tool` trait in `src/tools/` and register in `ToolRegistry`
-4. **Add Transport**: Implement new transport in `src/server/transport/`
+| Layer | Technology |
+|-------|-----------|
+| Language | Rust 1.75+ |
+| Async runtime | tokio |
+| HTTP client | reqwest + reqwest-middleware |
+| RSS parsing | feed-rs |
+| MCP protocol | rust-mcp-sdk |
+| Serialization | serde + toml |
+| Logging | tracing + tracing-subscriber |

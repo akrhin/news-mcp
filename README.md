@@ -2,214 +2,147 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://github.com/KingingWang/news-mcp/workflows/CI/badge.svg)](https://github.com/KingingWang/news-mcp/actions)
-[![Crates.io](https://img.shields.io/crates/v/news-mcp.svg)](https://crates.io/crates/news-mcp)
-[![Docker](https://img.shields.io/badge/docker-kingingwang/news--mcp-blue?logo=docker)](https://hub.docker.com/r/kingingwang/news-mcp)
+[![Fork](https://img.shields.io/badge/fork-KingingWang/news--mcp-blueviolet)](https://github.com/KingingWang/news-mcp)
 
-A Rust-based MCP (Model Context Protocol) server for fetching news from RSS feeds, with background polling, in-memory caching, and multiple transport modes.
+> **Fork** of [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — a Rust-based MCP server for fetching news from RSS feeds.
+
+**🇷🇺 Русская версия: [README_RU.md](README_RU.md)**
+
+---
+
+## What This Fork Adds
+
+- **Custom categories** — add any RSS feed as a new category via `config.toml`; no code changes needed
+- **Config-driven sources** — all feed URLs live in config, not in enum variants
+- **CVE & security presets** — built-in example configs for CISA, The Hacker News, OpenNET, Debian, Ubuntu, Red Hat security feeds
+- **Dynamic tool schema** — `get_news` and `get_categories` auto-discover custom categories from cache
+- **No startup blocking** — server starts immediately; cache fills on first poll tick
 
 ## Features
 
-- **Background Polling** - Periodically fetches news from RSS sources and caches locally
-- **Multiple Transport Modes** - Supports HTTP, SSE, stdio, and hybrid modes
-- **MCP Tools** - Provides `get_news`, `get_categories`, `get_article_content`
-  - `get_news` - Fetch news headlines by category
-  - `get_categories` - List available categories
-  - `get_article_content` - Fetch full article by ID (RSS sources only, not hot search)
-- **Multiple Categories** - Technology, Science, HackerNews, and 21 China News categories
-- **Pluggable Sources** - Extensible `NewsSource` trait for adding custom data sources
-- **In-memory Cache** - High-performance article cache with search functionality
-- **Retry Mechanism** - Automatic retry for failed RSS fetch requests
+- **Background Polling** — periodically fetches news from RSS sources and caches locally
+- **Multiple Transport Modes** — HTTP, SSE, stdio, hybrid
+- **MCP Tools** — `get_news`, `get_categories`, `get_article_content`
+- **Custom RSS Feeds** — add any feed without recompiling
+- **Built-in Sources** — Technology, Science, HackerNews, 21 China News categories, 11 NewsNow hot lists
+- **Pluggable Sources** — extensible `NewsSource` trait
+- **In-memory Cache** — high-performance article cache with search
+- **Retry Mechanism** — automatic retry for failed fetch requests
 
 ## Quick Start
 
-### Installation
-
-Choose one of the following methods:
-
-#### Option 1: Download Pre-built Binary
+### Build from Source
 
 ```bash
-# Download latest release from GitHub
-# Linux x86_64
-curl -L https://github.com/KingingWang/news-mcp/releases/latest/download/news-mcp-linux-x86_64 -o news-mcp
-chmod +x news-mcp
-sudo mv news-mcp /usr/local/bin/
-
-# macOS x86_64
-curl -L https://github.com/KingingWang/news-mcp/releases/latest/download/news-mcp-darwin-x86_64 -o news-mcp
-chmod +x news-mcp
-sudo mv news-mcp /usr/local/bin/
-
-# macOS ARM64
-curl -L https://github.com/KingingWang/news-mcp/releases/latest/download/news-mcp-darwin-arm64 -o news-mcp
-chmod +x news-mcp
-sudo mv news-mcp /usr/local/bin/
-```
-
-#### Option 2: Install from crates.io
-
-```bash
-cargo install news-mcp
-```
-
-#### Option 3: Docker
-
-```bash
-docker pull kingingwang/news-mcp:latest
-docker run -d -p 8080:8080 --name news-mcp kingingwang/news-mcp:latest
-```
-
-#### Option 4: Build from Source
-
-```bash
-git clone https://github.com/KingingWang/news-mcp
+git clone https://github.com/akrhin/news-mcp
 cd news-mcp
 cargo build --release
-# Binary will be at: ./target/release/news-mcp
+# Binary: ./target/release/news-mcp
 ```
 
 ### Run Server
 
 ```bash
-# HTTP mode (default)
+# stdio mode (for Claude Desktop / MCP hosts)
+news-mcp serve
+
+# HTTP mode
 news-mcp serve --mode http --port 8080
 
-# stdio mode (for Claude Desktop)
-news-mcp serve --mode stdio
-
-# With background polling enabled
-news-mcp serve --mode http --poll
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NEWS_MCP_PORT` | 8080 | Server port |
-| `NEWS_MCP_HOST` | 127.0.0.1 | Server host |
-| `NEWS_MCP_TRANSPORT` | http | Transport mode (stdio, http, sse, hybrid) |
-| `NEWS_MCP_INTERVAL` | 3600 | Polling interval in seconds |
-| `NEWS_MCP_LOG_LEVEL` | info | Log level (trace, debug, info, warn, error) |
-
-Example:
-```bash
-NEWS_MCP_PORT=9090 NEWS_MCP_LOG_LEVEL=debug news-mcp serve --mode http
+# With custom config
+news-mcp -c /path/to/config.toml serve
 ```
 
 ### Configuration File
 
-Create `config.toml` in the working directory:
+Create `config.toml` (all sections optional — defaults apply when omitted):
 
 ```toml
 [server]
-name = "news-mcp"
-version = "0.1.0"
 host = "127.0.0.1"
 port = 8080
-transport_mode = "http"  # Options: stdio, http, sse, hybrid
+transport_mode = "stdio"  # stdio | http | sse | hybrid
 
 [poller]
-interval_secs = 3600  # Poll every hour
+interval_secs = 3600  # poll every hour
 enabled = true
 
 [cache]
 max_articles_per_category = 100
 
 [logging]
-level = "info"        # trace, debug, info, warn, error
-enable_console = true
+level = "info"  # trace, debug, info, warn, error
+
+# ── Custom Feeds ─────────────────────────────────────
+# Any key under [feeds.*] becomes a new category.
+[feeds.cisa]
+display_name = "CISA Alerts"
+description = "CISA cybersecurity alerts"
+urls = ["https://www.cisa.gov/cybersecurity-advisories/all.xml"]
+enabled = true
+
+[feeds.thehackernews]
+display_name = "The Hacker News"
+description = "Cybersecurity news"
+urls = ["https://feeds.feedburner.com/TheHackersNews"]
+enabled = true
+
+[feeds.redhat-security]
+display_name = "Red Hat Security"
+description = "Red Hat security advisories"
+urls = ["https://access.redhat.com/security/data/meta/v1/rhsa.rss"]
+enabled = true
 ```
+
+See [config.example.toml](config.example.toml) for the full reference.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph Client["Client"]
-        CD["Claude Desktop<br/>or HTTP Client"]
-    end
-
-    subgraph Server["News MCP Server"]
-        Transport["Transport Layer<br/>(stdio / HTTP / SSE)"]
-        Handler["MCP Handler"]
-        ToolRegistry["Tool Registry"]
-
-        subgraph Tools["MCP Tools"]
-            GN["get_news"]
-            GC["get_categories"]
-            GAC["get_article_content"]
-        end
-    end
-
-    subgraph Core["Core Components"]
-        Cache["Cache<br/>(RwLock<HashMap>)"]
-        Poller["Background Poller"]
-        Service["News Service<br/>(HTTP + Retry)"]
-    end
-
-    subgraph Feeds["RSS Sources"]
-        Tech["TechCrunch, Ars Technica, The Verge"]
-        Sci["ScienceDaily"]
-        HN["Hacker News"]
-        CN["China News (21 categories)"]
-    end
-
-    CD -->|"MCP Protocol"| Transport
-    Transport --> Handler
-    Handler --> ToolRegistry
-    ToolRegistry --> Tools
-
-    Tools --> Cache
-    Poller -->|"Updates"| Cache
-    Poller -->|"Fetches"| Service
-    Service -->|"RSS/HTTP"| Feeds
+```
+┌──────────────┐     ┌─────────────────────────────────────┐
+│   Client     │     │         News MCP Server             │
+│ (Claude/HTTP)│────▶│  Transport → Handler → ToolRegistry │
+└──────────────┘     │       ↓          ↓          ↓       │
+                     │  get_news  get_categories  get_...   │
+                     │       ↓                            │
+                     │  ┌──────────────┐                  │
+                     │  │ Cache (RwLock)│◀── Poller       │
+                     │  └──────────────┘     │            │
+                     │                  ┌────┴─────┐      │
+                     │                  │ NewsService│    │
+                     │                  └────┬─────┘      │
+                     └──────────────────────┼─────────────┘
+                                            │
+                    ┌───────────────────────┼───────────────────┐
+                    │  RSS Feeds            │   NewsNow API     │
+                    │  (TechCrunch, CISA,   │   (微博热搜, ...) │
+                    │   Debian, Custom...)  │                   │
+                    └───────────────────────┴───────────────────┘
 ```
 
 ## MCP Tools
 
 ### get_news
 
-Fetch articles by category.
+Fetch articles by category. Parameters: `category` (string), `limit` (1–50, default 10), `format` (markdown|json|text).
 
-**Parameters:**
-- `category` - News category (see [Categories](#categories))
-- `limit` - Number of articles (default 10, max 50)
-- `format` - Output format: `markdown`, `json`, `text`
-
-**Example:**
 ```json
-{
-  "category": "technology",
-  "limit": 5,
-  "format": "markdown"
-}
+{"category": "technology", "limit": 5, "format": "markdown"}
 ```
 
 ### get_categories
 
-List available news categories with article counts.
+List all available categories (built-in + custom) with article counts.
 
 ### get_article_content
 
-Fetch full article content by article ID. Use this after browsing headlines with `get_news` to read selected articles.
+Fetch full article content by article ID. Only works for RSS-based sources, not for hot search / trending topics.
 
-**Note:** Hot search/trending topics (微博热搜, 百度热搜, etc.) do not support content fetching - they are social platform trends, not full articles. Only works for RSS-based sources.
-
-**Parameters:**
-- `id` - Article ID (shown in `get_news` output)
-- `format` - Output format: `markdown`, `json`, `text`
-
-**Example:**
-```json
-{
-  "id": "article-id",
-  "format": "markdown"
-}
-```
+**Parameters:** `id` (string), `format` (markdown|json|text).
 
 ## Categories
 
-### International
+### Built-in International
 
 | Category | Sources |
 |----------|---------|
@@ -217,120 +150,62 @@ Fetch full article content by article ID. Use this after browsing headlines with
 | `science` | ScienceDaily |
 | `hackernews` | Hacker News |
 
-### China News (chinanews.com.cn)
+### Built-in China News (21 feeds)
 
-| Category | Description |
-|----------|-------------|
-| `instant` | Instant News |
-| `headlines` | Headlines |
-| `politics` | Politics |
-| `society` | Society |
-| `finance` | Finance |
-| `life` | Life |
-| `wellness` | Health |
-| `education` | Education |
-| `law` | Law |
-| ... | [See full list](https://github.com/KingingWang/news-mcp#categories) |
+`instant`, `headlines`, `politics`, `eastwest`, `society`, `finance`, `life`, `wellness`, `greaterbayarea`, `chinese`, `video`, `photo`, `creative`, `live`, `education`, `law`, `unitedfront`, `ethnicunity`, `theory`, `asean`
+
+### Built-in Hot Lists (NewsNow)
+
+`weibohot`, `baiduhot`, `zhihuhot`, `douyinhot`, `bilibilihot`, `tiebahot`, `toutiaohot`, `wallstreetcnhot`, `clshot`, `thepaperhot`, `ifenghot`
+
+### Custom Categories
+
+Any key added under `[feeds.*]` in `config.toml` automatically appears as a new category. No recompile needed.
 
 ## Claude Desktop Integration
-
-Add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "news": {
-      "command": "news-mcp",
-      "args": ["serve", "--mode", "stdio"]
+      "command": "/path/to/news-mcp",
+      "args": ["-c", "/path/to/config.toml", "serve"]
     }
   }
 }
 ```
 
-## HTTP API Usage
+## Environment Variables
 
-```bash
-# Initialize session
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2024-11-05",
-      "capabilities": {},
-      "clientInfo": {"name": "test", "version": "1.0"}
-    },
-    "id": 1
-  }'
-
-# Call tool (replace <session-id> with response from initialize)
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -H "mcp-session-id: <session-id>" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/call",
-    "params": {
-      "name": "get_news",
-      "arguments": {"category": "technology", "limit": 5}
-    },
-    "id": 2
-  }'
-
-# Health check
-curl http://localhost:8080/health
-```
-
-## Docker Deployment
-
-```bash
-# Run with default config
-docker run -d -p 8080:8080 --name news-mcp kingingwang/news-mcp:latest
-
-# With custom config
-docker run -d -p 8080:8080 \
-  -v /path/to/config.toml:/etc/news-mcp/config.toml \
-  --name news-mcp kingingwang/news-mcp:latest
-
-# With environment variables
-docker run -d -p 8080:8080 \
-  -e NEWS_MCP_INTERVAL=1800 \
-  -e NEWS_MCP_LOG_LEVEL=debug \
-  --name news-mcp kingingwang/news-mcp:latest
-```
-
-See [Docker Guide](examples/docker.md) for more details.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEWS_MCP_PORT` | 8080 | Server port |
+| `NEWS_MCP_HOST` | 127.0.0.1 | Server host |
+| `NEWS_MCP_TRANSPORT` | stdio | Transport mode |
+| `NEWS_MCP_INTERVAL` | 3600 | Polling interval (seconds) |
+| `NEWS_MCP_LOG_LEVEL` | info | Log level |
 
 ## Development
 
 ```bash
-# Run tests
-cargo test
-cargo test --test unit
-cargo test --test e2e
-
-# Format & lint
-cargo fmt
-cargo clippy
-
-# Generate docs
-cargo doc --open
+cargo test              # All tests (66+)
+cargo test --test unit  # Unit tests
+cargo fmt && cargo clippy
 ```
 
 ## Documentation
 
-- [Architecture](ARCHITECTURE.md) - System design and component overview
-- [Contributing](CONTRIBUTING.md) - Development guidelines
-- [Changelog](CHANGELOG.md) - Version history
-- [Examples](examples/) - Usage guides
+- [Architecture](ARCHITECTURE.md) — component overview and configuration guide
+- [config.example.toml](config.example.toml) — full config reference with CVE feed presets
+- [README_RU.md](README_RU.md) — русская версия
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [rust-mcp-sdk](https://github.com/rust-mcp-stack/rust-mcp-sdk) - MCP SDK
-- [feed-rs](https://github.com/feed-rs/feed-rs) - RSS/Atom parsing
-- [tokio](https://tokio.rs) - Async runtime
+- [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — original project
+- [rust-mcp-sdk](https://github.com/rust-mcp-stack/rust-mcp-sdk) — MCP SDK
+- [feed-rs](https://github.com/feed-rs/feed-rs) — RSS/Atom parsing
+- [tokio](https://tokio.rs) — async runtime

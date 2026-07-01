@@ -1,0 +1,71 @@
+# news-mcp configuration example
+#
+# Place this file at ~/.hermes/news-mcp.toml (or pass via --config path).
+#
+# All sections with defaults can be omitted. Only the `[feeds.*]` sections
+# you actually want to add or override need to be present.
+# If no config file is found, the built-in defaults (TechCrunch, ScienceDaily,
+# China News, NewsNow hot lists) are used automatically.
+
+# ── Server ──────────────────────────────────────────────────────────────
+[server]
+name = "news-mcp"
+version = "0.1.0"
+host = "127.0.0.1"
+port = 8080
+transport_mode = "stdio"   # stdio | http | sse | hybrid
+
+# ── Poller ──────────────────────────────────────────────────────────────
+[poller]
+enabled = true              # background polling
+interval_secs = 3600        # 1 hour
+
+# ── Cache ──────────────────────────────────────────────────────────────
+[cache]
+max_articles_per_category = 100
+
+# ── Article Content Fetch ──────────────────────────────────────────────
+[article_fetch]
+fetch_timeout_secs = 10
+
+# ── Logging ────────────────────────────────────────────────────────────
+[logging]
+level = "info"
+enable_console = true
+
+# ── Custom Feed Sources ─────────────────────────────────────────────────
+#
+# Each key under [feeds] becomes a custom NewsCategory.
+# - key must be lowercase, alphanumeric + hyphens/underscores
+# - display_name and description are optional
+# - urls: list of RSS/Atom feed URLs
+# - enabled: true/false
+#
+# After adding a feed here it becomes available in get_news/get_categories
+# and the poller fetches it on every cycle.
+#
+# Examples:
+
+[feeds.cve-redhat]
+display_name = "Red Hat CVE"
+description = "Red Hat Security Advisories"
+urls = ["https://access.redhat.com/security/data/metrics/cve-daily.xml"]
+enabled = true
+
+[feeds.cve-debian]
+display_name = "Debian Security"
+description = "Debian Security Bug Tracker"
+urls = ["https://www.debian.org/security/dsa"]
+enabled = true
+
+[feeds.cve-ubuntu]
+display_name = "Ubuntu Security"
+description = "Ubuntu Security Notices"
+urls = ["https://ubuntu.com/security/notices/rss.xml"]
+enabled = true
+
+[feeds.cve-arch]
+display_name = "Arch Linux CVEs"
+description = "Arch Linux Security Advisories"
+urls = ["https://security.archlinux.org/"]
+enabled = true
