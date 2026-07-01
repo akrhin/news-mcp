@@ -54,7 +54,7 @@ fn test_parse_feed() {
 
     let service = NewsService::new();
     let articles = service
-        .parse_feed(sample_rss, NewsCategory::Technology)
+        .parse_feed(sample_rss.as_bytes(), NewsCategory::Technology)
         .unwrap();
 
     assert_eq!(articles.len(), 2);
@@ -81,7 +81,7 @@ fn test_parse_atom_feed() {
 
     let service = NewsService::new();
     let articles = service
-        .parse_feed(sample_atom, NewsCategory::Science)
+        .parse_feed(sample_atom.as_bytes(), NewsCategory::Science)
         .unwrap();
 
     assert_eq!(articles.len(), 1);

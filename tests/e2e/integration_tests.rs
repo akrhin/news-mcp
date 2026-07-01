@@ -35,7 +35,7 @@ fn test_full_workflow() {
 
     let service = NewsService::new();
     let articles = service
-        .parse_feed(sample_feed, NewsCategory::Technology)
+        .parse_feed(sample_feed.as_bytes(), NewsCategory::Technology)
         .unwrap();
 
     // Store in cache
