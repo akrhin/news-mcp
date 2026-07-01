@@ -30,9 +30,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 reqwest-middleware = "0.5"
 reqwest-retry = "0.9"
 
-# Encoding detection for non-UTF-8 feeds (KOI8-R, Windows-1251, GB2312, etc.)
-encoding_rs = "0.8"
-
 # Async runtime
 tokio = { version = "1.50", features = ["full"] }
 

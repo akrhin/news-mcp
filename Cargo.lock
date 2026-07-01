@@ -1263,7 +1263,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
- "encoding_rs",
  "feed-rs",
  "futures",
  "reqwest 0.13.2",
