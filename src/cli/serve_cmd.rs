@@ -42,21 +42,13 @@ pub async fn serve_command(
 
     // Start poller if enabled
     if config.poller.enabled {
-        let poller = start_poller(&config, cache.clone());
+        let _poller = start_poller(&config, cache.clone());
         info!(
             "Background poller started with {} second interval",
             config.poller.interval_secs
         );
-
-        // Wait for initial poll to complete before accepting requests
-        // This ensures the cache is populated before clients can query
-        info!("Waiting for initial news poll to complete...");
-        let timeout_secs = 60; // Allow up to 60 seconds for initial poll
-        if poller.wait_for_initial_poll(timeout_secs).await {
-            info!("Initial poll completed, cache is now populated");
-        } else {
-            warn!("Initial poll did not complete within {} seconds, starting server with potentially empty cache", timeout_secs);
-        }
+        // No startup blocking: server starts accepting requests immediately.
+        // Cache starts empty and gets populated on first poll tick.
     }
 
     // Run server with specified transport mode

@@ -13,13 +13,15 @@ fn test_news_category_from_str() {
         NewsCategory::from_str("tech").unwrap(),
         NewsCategory::Technology
     );
-    assert!(NewsCategory::from_str("invalid").is_err());
+    // Unknown keys become Custom (no longer an error)
+    let custom = NewsCategory::from_str("invalid").unwrap();
+    assert!(matches!(custom, NewsCategory::Custom(ref n) if n == "invalid"));
 }
 
 #[test]
-fn test_news_category_all() {
-    let categories = NewsCategory::all();
-    assert_eq!(categories.len(), 34); // 27 categories after removing empty ones
+fn test_news_category_builtin() {
+    let categories = NewsCategory::builtin();
+    assert_eq!(categories.len(), 34);
 }
 
 #[test]

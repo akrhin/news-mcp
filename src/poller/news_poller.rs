@@ -53,16 +53,18 @@ impl NewsPoller {
             self.config.interval_secs
         );
 
-        // Initial poll immediately
-        if let Err(e) = self.poll_once().await {
-            error!("Initial poll failed: {}", e);
-        }
+        // No initial poll on startup — server starts instantly.
+        // First poll happens at the interval tick.
+        // Set initial poll as "completed" immediately so startup is never blocked.
         self.initial_poll_completed
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
         // Set up interval for subsequent polls
         let mut poll_interval = interval(Duration::from_secs(self.config.interval_secs));
 
+        // First tick happens immediately (interval elapses right away)
+        // but we skip it since we've already marked completed.
+        // Actually: tokio::interval first tick IS immediate. We want first real poll at first tick.
         loop {
             poll_interval.tick().await;
 
@@ -93,18 +95,18 @@ impl NewsPoller {
                         total_articles += count;
 
                         if count > 0 {
-                            self.cache.set_category_news(category, articles)?;
+                            self.cache.set_category_news(category.clone(), articles)?;
                             successful_categories += 1;
                             info!(
                                 "Updated {} articles for category {} from {}",
                                 count,
-                                category,
+                                category.clone(),
                                 source.name()
                             );
                         } else {
                             warn!(
                                 "No articles fetched for category {} from {}",
-                                category,
+                                category.clone(),
                                 source.name()
                             );
                         }

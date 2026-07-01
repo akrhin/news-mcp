@@ -176,12 +176,13 @@ async fn test_get_news_invalid_category() {
     let feeds = create_test_feeds();
     let tool = GetNewsToolImpl::new(cache, feeds);
 
+    // "invalid_category" is now accepted as Custom category (never fails)
     let params = serde_json::json!({
         "category": "invalid_category"
     });
 
-    let result = tool.execute(params).await;
-    assert!(result.is_err());
+    let result = tool.execute(params).await.unwrap();
+    assert!(!get_text_content(&result).is_empty());
 }
 
 #[tokio::test]

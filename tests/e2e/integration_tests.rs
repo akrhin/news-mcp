@@ -118,13 +118,13 @@ fn test_multiple_categories_workflow() {
     let cache = Arc::new(NewsCache::new(100));
 
     // Add articles to multiple categories
-    for category in NewsCategory::all() {
+    for category in NewsCategory::builtin() {
         let article = NewsArticle::new(
             format!("{} News", category.display_name()),
             None,
             "https://example.com".to_string(),
             "Source".to_string(),
-            category,
+            category.clone(),
             None,
             None,
         );
@@ -139,7 +139,7 @@ fn test_multiple_categories_workflow() {
 
         let articles = cache.get_category_news(&category).unwrap();
         assert_eq!(articles.len(), 1);
-        assert!(articles[0].title.contains(category.display_name()));
+        assert!(articles[0].title.contains(category.display_name().as_ref()));
     }
 }
 

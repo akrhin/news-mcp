@@ -5,20 +5,18 @@
 use crate::error::{Error, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
 /// Generate a stable ID from URL using simple hash
 fn generate_id_from_url(url: &str) -> String {
-    // Use first 8 chars of URL's MD5-like hash (simple approach)
-    // For simplicity, use base64 of last segment of URL
     let hash = url
         .split('/')
         .rfind(|s| !s.is_empty())
         .map(|s| s.chars().take(12).collect::<String>())
         .unwrap_or_else(|| url.chars().take(12).collect());
 
-    // Clean up and create a readable ID
     let clean_hash: String = hash
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
@@ -26,17 +24,17 @@ fn generate_id_from_url(url: &str) -> String {
         .collect();
 
     if clean_hash.is_empty() {
-        // Fallback: use position-based hash
         format!("art-{:04x}", url.len() % 10000)
     } else {
         clean_hash
     }
 }
 
-/// News category enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// News category — can be a builtin (Technology, HackerNews, China News, NewsNow)
+/// or a user-defined custom category from config file.
+#[derive(Debug, Clone, Eq, Hash)]
 pub enum NewsCategory {
+    // International
     Technology,
     Science,
     HackerNews,
@@ -73,62 +71,144 @@ pub enum NewsCategory {
     ClsHot,
     ThepaperHot,
     IfengHot,
+    /// User-defined category from config `[feeds.<name>]`. Value is the config key.
+    Custom(String),
 }
 
-impl std::str::FromStr for NewsCategory {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<NewsCategory> {
-        match s.to_lowercase().as_str() {
-            "technology" | "tech" => Ok(NewsCategory::Technology),
-            "science" => Ok(NewsCategory::Science),
-            "hackernews" | "hn" => Ok(NewsCategory::HackerNews),
-            // China News categories
-            "instant" | "即时新闻" => Ok(NewsCategory::Instant),
-            "headlines" | "要闻导读" => Ok(NewsCategory::Headlines),
-            "politics" | "时政新闻" => Ok(NewsCategory::Politics),
-            "eastwest" | "东西问" => Ok(NewsCategory::EastWest),
-            "society" | "社会新闻" => Ok(NewsCategory::Society),
-            "finance" | "财经新闻" => Ok(NewsCategory::Finance),
-            "life" | "生活" => Ok(NewsCategory::Life),
-            "wellness" | "健康" => Ok(NewsCategory::Wellness),
-            "greaterbayarea" | "大湾区" => Ok(NewsCategory::GreaterBayArea),
-            "chinese" | "华人" => Ok(NewsCategory::Chinese),
-            "video" | "视频" => Ok(NewsCategory::Video),
-            "photo" | "图片" => Ok(NewsCategory::Photo),
-            "creative" | "创意" => Ok(NewsCategory::Creative),
-            "live" | "直播" => Ok(NewsCategory::Live),
-            "education" | "教育" => Ok(NewsCategory::Education),
-            "law" | "法治" => Ok(NewsCategory::Law),
-            "unitedfront" | "同心" => Ok(NewsCategory::UnitedFront),
-            "ethnicunity" | "铸牢中华民族共同体意识" => Ok(NewsCategory::EthnicUnity),
-            "theory" | "理论" => Ok(NewsCategory::Theory),
-            "asean" | "中国—东盟商贸资讯平台" => Ok(NewsCategory::Asean),
-            // NewsNow Hot List categories
-            "weibohot" | "微博热搜" => Ok(NewsCategory::WeiboHot),
-            "baiduhot" | "百度热搜" => Ok(NewsCategory::BaiduHot),
-            "zhihuhot" | "知乎热榜" => Ok(NewsCategory::ZhihuHot),
-            "douyinhot" | "抖音热点" => Ok(NewsCategory::DouyinHot),
-            "bilibilihot" | "b站热搜" => Ok(NewsCategory::BilibiliHot),
-            "tiebahot" | "贴吧热议" => Ok(NewsCategory::TiebaHot),
-            "toutiaohot" | "今日头条热点" => Ok(NewsCategory::ToutiaoHot),
-            "wallstreetcnhot" | "华尔街见闻热门" => Ok(NewsCategory::WallstreetcnHot),
-            "clshot" | "财联社热门" => Ok(NewsCategory::ClsHot),
-            "thepaperhot" | "澎湃热门" => Ok(NewsCategory::ThepaperHot),
-            "ifenghot" | "凤凰网热门" => Ok(NewsCategory::IfengHot),
-            _ => Err(Error::invalid_category(s)),
+// ── Serialize: plain string ─────────────────────────────────────────────
+impl Serialize for NewsCategory {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        match self {
+            Self::Custom(name) => serializer.serialize_str(name),
+            other => serializer.serialize_str(other.config_key().as_ref()),
         }
     }
 }
 
+impl<'de> Deserialize<'de> for NewsCategory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::from_config_key(&s))
+    }
+}
+
+impl PartialEq for NewsCategory {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Custom(a), Self::Custom(b)) => a == b,
+            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
+        }
+    }
+}
+
+impl std::str::FromStr for NewsCategory {
+    type Err = std::convert::Infallible;
+
+    /// Parse a category from a string. Never fails — unknown keys become `Custom(name)`.
+    fn from_str(s: &str) -> std::result::Result<NewsCategory, Self::Err> {
+        Ok(Self::from_config_key(s))
+    }
+}
+
 impl NewsCategory {
-    /// Get all categories
-    pub fn all() -> Vec<NewsCategory> {
+    /// Normalize a user-provided string to a config key.
+    fn normalize_key(s: &str) -> String {
+        s.to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect()
+    }
+
+    /// Parse a category from a config key. Falls through to Custom if not a builtin.
+    pub fn from_config_key(s: &str) -> NewsCategory {
+        let key = Self::normalize_key(s);
+        match key.as_str() {
+            "technology" | "tech" => NewsCategory::Technology,
+            "science" => NewsCategory::Science,
+            "hackernews" | "hn" => NewsCategory::HackerNews,
+            "instant" | "即时新闻" => NewsCategory::Instant,
+            "headlines" | "要闻导读" => NewsCategory::Headlines,
+            "politics" | "时政新闻" => NewsCategory::Politics,
+            "eastwest" | "东西问" => NewsCategory::EastWest,
+            "society" | "社会新闻" => NewsCategory::Society,
+            "finance" | "财经新闻" => NewsCategory::Finance,
+            "life" | "生活" => NewsCategory::Life,
+            "wellness" | "健康" => NewsCategory::Wellness,
+            "greaterbayarea" | "大湾区" => NewsCategory::GreaterBayArea,
+            "chinese" | "华人" => NewsCategory::Chinese,
+            "video" | "视频" => NewsCategory::Video,
+            "photo" | "图片" => NewsCategory::Photo,
+            "creative" | "创意" => NewsCategory::Creative,
+            "live" | "直播" => NewsCategory::Live,
+            "education" | "教育" => NewsCategory::Education,
+            "law" | "法治" => NewsCategory::Law,
+            "unitedfront" | "同心" => NewsCategory::UnitedFront,
+            "ethnicunity" | "铸牢中华民族共同体意识" => NewsCategory::EthnicUnity,
+            "theory" | "理论" => NewsCategory::Theory,
+            "asean" | "中国—东盟商贸资讯平台" => NewsCategory::Asean,
+            "weibohot" | "微博热搜" => NewsCategory::WeiboHot,
+            "baiduhot" | "百度热搜" => NewsCategory::BaiduHot,
+            "zhihuhot" | "知乎热榜" => NewsCategory::ZhihuHot,
+            "douyinhot" | "抖音热点" => NewsCategory::DouyinHot,
+            "bilibilihot" | "b站热搜" => NewsCategory::BilibiliHot,
+            "tiebahot" | "贴吧热议" => NewsCategory::TiebaHot,
+            "toutiaohot" | "今日头条热点" => NewsCategory::ToutiaoHot,
+            "wallstreetcnhot" | "华尔街见闻热门" => NewsCategory::WallstreetcnHot,
+            "clshot" | "财联社热门" => NewsCategory::ClsHot,
+            "thepaperhot" | "澎湃热门" => NewsCategory::ThepaperHot,
+            "ifenghot" | "凤凰网热门" => NewsCategory::IfengHot,
+            _ => NewsCategory::Custom(key),
+        }
+    }
+
+    /// Config key for feed URL lookups (`config.feeds.<key>`).
+    pub fn config_key(&self) -> Cow<'_, str> {
+        use NewsCategory::*;
+        match self {
+            Technology => Cow::Borrowed("technology"),
+            Science => Cow::Borrowed("science"),
+            HackerNews => Cow::Borrowed("hackernews"),
+            Instant => Cow::Borrowed("instant"),
+            Headlines => Cow::Borrowed("headlines"),
+            Politics => Cow::Borrowed("politics"),
+            EastWest => Cow::Borrowed("eastwest"),
+            Society => Cow::Borrowed("society"),
+            Finance => Cow::Borrowed("finance"),
+            Life => Cow::Borrowed("life"),
+            Wellness => Cow::Borrowed("wellness"),
+            GreaterBayArea => Cow::Borrowed("greaterbayarea"),
+            Chinese => Cow::Borrowed("chinese"),
+            Video => Cow::Borrowed("video"),
+            Photo => Cow::Borrowed("photo"),
+            Creative => Cow::Borrowed("creative"),
+            Live => Cow::Borrowed("live"),
+            Education => Cow::Borrowed("education"),
+            Law => Cow::Borrowed("law"),
+            UnitedFront => Cow::Borrowed("unitedfront"),
+            EthnicUnity => Cow::Borrowed("ethnicunity"),
+            Theory => Cow::Borrowed("theory"),
+            Asean => Cow::Borrowed("asean"),
+            WeiboHot => Cow::Borrowed("weibohot"),
+            BaiduHot => Cow::Borrowed("baiduhot"),
+            ZhihuHot => Cow::Borrowed("zhihuhot"),
+            DouyinHot => Cow::Borrowed("douyinhot"),
+            BilibiliHot => Cow::Borrowed("bilibilihot"),
+            TiebaHot => Cow::Borrowed("tiebahot"),
+            ToutiaoHot => Cow::Borrowed("toutiaohot"),
+            WallstreetcnHot => Cow::Borrowed("wallstreetcnhot"),
+            ClsHot => Cow::Borrowed("clshot"),
+            ThepaperHot => Cow::Borrowed("thepaperhot"),
+            IfengHot => Cow::Borrowed("ifenghot"),
+            Custom(name) => Cow::Owned(name.clone()),
+        }
+    }
+
+    /// All builtin categories (excludes user-defined Custom).
+    pub fn builtin() -> Vec<NewsCategory> {
         vec![
             NewsCategory::Technology,
             NewsCategory::Science,
             NewsCategory::HackerNews,
-            // China News categories
             NewsCategory::Instant,
             NewsCategory::Headlines,
             NewsCategory::Politics,
@@ -149,7 +229,6 @@ impl NewsCategory {
             NewsCategory::EthnicUnity,
             NewsCategory::Theory,
             NewsCategory::Asean,
-            // NewsNow Hot List categories
             NewsCategory::WeiboHot,
             NewsCategory::BaiduHot,
             NewsCategory::ZhihuHot,
@@ -164,87 +243,87 @@ impl NewsCategory {
         ]
     }
 
-    /// Get display name
-    pub fn display_name(&self) -> &'static str {
+    /// Display name for user-facing output.
+    pub fn display_name(&self) -> Cow<'_, str> {
+        use NewsCategory::*;
         match self {
-            NewsCategory::Technology => "Technology",
-            NewsCategory::Science => "Science",
-            NewsCategory::HackerNews => "Hacker News",
-            // China News categories
-            NewsCategory::Instant => "即时新闻",
-            NewsCategory::Headlines => "要闻导读",
-            NewsCategory::Politics => "时政新闻",
-            NewsCategory::EastWest => "东西问",
-            NewsCategory::Society => "社会新闻",
-            NewsCategory::Finance => "财经新闻",
-            NewsCategory::Life => "生活",
-            NewsCategory::Wellness => "健康",
-            NewsCategory::GreaterBayArea => "大湾区",
-            NewsCategory::Chinese => "华人",
-            NewsCategory::Video => "视频",
-            NewsCategory::Photo => "图片",
-            NewsCategory::Creative => "创意",
-            NewsCategory::Live => "直播",
-            NewsCategory::Education => "教育",
-            NewsCategory::Law => "法治",
-            NewsCategory::UnitedFront => "同心",
-            NewsCategory::EthnicUnity => "铸牢中华民族共同体意识",
-            NewsCategory::Theory => "理论",
-            NewsCategory::Asean => "中国—东盟商贸资讯平台",
-            // NewsNow Hot List categories
-            NewsCategory::WeiboHot => "微博热搜",
-            NewsCategory::BaiduHot => "百度热搜",
-            NewsCategory::ZhihuHot => "知乎热榜",
-            NewsCategory::DouyinHot => "抖音热点",
-            NewsCategory::BilibiliHot => "B站热搜",
-            NewsCategory::TiebaHot => "贴吧热议",
-            NewsCategory::ToutiaoHot => "今日头条热点",
-            NewsCategory::WallstreetcnHot => "华尔街见闻热门",
-            NewsCategory::ClsHot => "财联社热门",
-            NewsCategory::ThepaperHot => "澎湃热门",
-            NewsCategory::IfengHot => "凤凰网热门",
+            Technology => Cow::Borrowed("Technology"),
+            Science => Cow::Borrowed("Science"),
+            HackerNews => Cow::Borrowed("Hacker News"),
+            Instant => Cow::Borrowed("即时新闻"),
+            Headlines => Cow::Borrowed("要闻导读"),
+            Politics => Cow::Borrowed("时政新闻"),
+            EastWest => Cow::Borrowed("东西问"),
+            Society => Cow::Borrowed("社会新闻"),
+            Finance => Cow::Borrowed("财经新闻"),
+            Life => Cow::Borrowed("生活"),
+            Wellness => Cow::Borrowed("健康"),
+            GreaterBayArea => Cow::Borrowed("大湾区"),
+            Chinese => Cow::Borrowed("华人"),
+            Video => Cow::Borrowed("视频"),
+            Photo => Cow::Borrowed("图片"),
+            Creative => Cow::Borrowed("创意"),
+            Live => Cow::Borrowed("直播"),
+            Education => Cow::Borrowed("教育"),
+            Law => Cow::Borrowed("法治"),
+            UnitedFront => Cow::Borrowed("同心"),
+            EthnicUnity => Cow::Borrowed("铸牢中华民族共同体意识"),
+            Theory => Cow::Borrowed("理论"),
+            Asean => Cow::Borrowed("中国—东盟商贸资讯平台"),
+            WeiboHot => Cow::Borrowed("微博热搜"),
+            BaiduHot => Cow::Borrowed("百度热搜"),
+            ZhihuHot => Cow::Borrowed("知乎热榜"),
+            DouyinHot => Cow::Borrowed("抖音热点"),
+            BilibiliHot => Cow::Borrowed("B站热搜"),
+            TiebaHot => Cow::Borrowed("贴吧热议"),
+            ToutiaoHot => Cow::Borrowed("今日头条热点"),
+            WallstreetcnHot => Cow::Borrowed("华尔街见闻热门"),
+            ClsHot => Cow::Borrowed("财联社热门"),
+            ThepaperHot => Cow::Borrowed("澎湃热门"),
+            IfengHot => Cow::Borrowed("凤凰网热门"),
+            Custom(name) => Cow::Owned(name.clone()),
         }
     }
 
-    /// Get description
-    pub fn description(&self) -> &'static str {
+    /// Human-readable description.
+    pub fn description(&self) -> Cow<'_, str> {
+        use NewsCategory::*;
         match self {
-            NewsCategory::Technology => "Technology news from TechCrunch, Ars Technica, The Verge",
-            NewsCategory::Science => "Science news from ScienceDaily",
-            NewsCategory::HackerNews => "Top stories from Hacker News",
-            // China News categories
-            NewsCategory::Instant => "即时新闻 - 中国新闻网滚动新闻",
-            NewsCategory::Headlines => "要闻导读 - 中国新闻网重要新闻",
-            NewsCategory::Politics => "时政新闻 - 中国新闻网时政要闻",
-            NewsCategory::EastWest => "东西问 - 中国新闻网文化对话",
-            NewsCategory::Society => "社会新闻 - 中国新闻网社会百态",
-            NewsCategory::Finance => "财经新闻 - 中国新闻网财经资讯",
-            NewsCategory::Life => "生活 - 中国新闻网生活服务",
-            NewsCategory::Wellness => "健康 - 中国新闻网健康资讯",
-            NewsCategory::GreaterBayArea => "大湾区 - 中国新闻网粤港澳大湾区",
-            NewsCategory::Chinese => "华人 - 中国新闻网海外华人",
-            NewsCategory::Video => "视频 - 中国新闻网视频新闻",
-            NewsCategory::Photo => "图片 - 中国新闻网图片新闻",
-            NewsCategory::Creative => "创意 - 中国新闻网创意产业",
-            NewsCategory::Live => "直播 - 中国新闻网直播报道",
-            NewsCategory::Education => "教育 - 中国新闻网教育资讯",
-            NewsCategory::Law => "法治 - 中国新闻网法治新闻",
-            NewsCategory::UnitedFront => "同心 - 中国新闻网统战新闻",
-            NewsCategory::EthnicUnity => "铸牢中华民族共同体意识 - 中国新闻网民族新闻",
-            NewsCategory::Theory => "理论 - 中国新闻网理论动态",
-            NewsCategory::Asean => "中国—东盟商贸资讯平台 - 中国新闻网东盟资讯",
-            // NewsNow Hot List categories
-            NewsCategory::WeiboHot => "微博热搜 - 实时热搜榜",
-            NewsCategory::BaiduHot => "百度热搜 - 百度实时热搜",
-            NewsCategory::ZhihuHot => "知乎热榜 - 知乎热门话题",
-            NewsCategory::DouyinHot => "抖音热点 - 抖音热门视频",
-            NewsCategory::BilibiliHot => "B站热搜 - 哔哩哔哩热搜榜",
-            NewsCategory::TiebaHot => "贴吧热议 - 百度贴吧热议话题",
-            NewsCategory::ToutiaoHot => "今日头条热点 - 头条热门资讯",
-            NewsCategory::WallstreetcnHot => "华尔街见闻热门 - 财经资讯",
-            NewsCategory::ClsHot => "财联社热门 - 金融快讯",
-            NewsCategory::ThepaperHot => "澎湃热门 - 澎湃新闻热点",
-            NewsCategory::IfengHot => "凤凰网热门 - 凤凰资讯热点",
+            Technology => Cow::Borrowed("Technology news from TechCrunch, Ars Technica, The Verge"),
+            Science => Cow::Borrowed("Science news from ScienceDaily"),
+            HackerNews => Cow::Borrowed("Top stories from Hacker News"),
+            Instant => Cow::Borrowed("即时新闻 - 中国新闻网滚动新闻"),
+            Headlines => Cow::Borrowed("要闻导读 - 中国新闻网重要新闻"),
+            Politics => Cow::Borrowed("时政新闻 - 中国新闻网时政要闻"),
+            EastWest => Cow::Borrowed("东西问 - 中国新闻网文化对话"),
+            Society => Cow::Borrowed("社会新闻 - 中国新闻网社会百态"),
+            Finance => Cow::Borrowed("财经新闻 - 中国新闻网财经资讯"),
+            Life => Cow::Borrowed("生活 - 中国新闻网生活服务"),
+            Wellness => Cow::Borrowed("健康 - 中国新闻网健康资讯"),
+            GreaterBayArea => Cow::Borrowed("大湾区 - 中国新闻网粤港澳大湾区"),
+            Chinese => Cow::Borrowed("华人 - 中国新闻网海外华人"),
+            Video => Cow::Borrowed("视频 - 中国新闻网视频新闻"),
+            Photo => Cow::Borrowed("图片 - 中国新闻网图片新闻"),
+            Creative => Cow::Borrowed("创意 - 中国新闻网创意产业"),
+            Live => Cow::Borrowed("直播 - 中国新闻网直播报道"),
+            Education => Cow::Borrowed("教育 - 中国新闻网教育资讯"),
+            Law => Cow::Borrowed("法治 - 中国新闻网法治新闻"),
+            UnitedFront => Cow::Borrowed("同心 - 中国新闻网统战新闻"),
+            EthnicUnity => Cow::Borrowed("铸牢中华民族共同体意识 - 中国新闻网民族新闻"),
+            Theory => Cow::Borrowed("理论 - 中国新闻网理论动态"),
+            Asean => Cow::Borrowed("中国—东盟商贸资讯平台 - 中国新闻网东盟资讯"),
+            WeiboHot => Cow::Borrowed("微博热搜 - 实时热搜榜"),
+            BaiduHot => Cow::Borrowed("百度热搜 - 百度实时热搜"),
+            ZhihuHot => Cow::Borrowed("知乎热榜 - 知乎热门话题"),
+            DouyinHot => Cow::Borrowed("抖音热点 - 抖音热门视频"),
+            BilibiliHot => Cow::Borrowed("B站热搜 - 哔哩哔哩热搜榜"),
+            TiebaHot => Cow::Borrowed("贴吧热议 - 百度贴吧热议话题"),
+            ToutiaoHot => Cow::Borrowed("今日头条热点 - 头条热门资讯"),
+            WallstreetcnHot => Cow::Borrowed("华尔街见闻热门 - 财经资讯"),
+            ClsHot => Cow::Borrowed("财联社热门 - 金融快讯"),
+            ThepaperHot => Cow::Borrowed("澎湃热门 - 澎湃新闻热点"),
+            IfengHot => Cow::Borrowed("凤凰网热门 - 凤凰资讯热点"),
+            Custom(name) => Cow::Owned(format!("User-defined feed: {name}")),
         }
     }
 }
@@ -374,7 +453,7 @@ impl NewsCache {
             .into_iter()
             .take(self.max_articles_per_category)
             .collect();
-        cache.insert(category, limited_articles);
+        cache.insert(category.clone(), limited_articles);
 
         let mut updated = self
             .last_updated
@@ -427,19 +506,28 @@ impl NewsCache {
         Ok(results)
     }
 
-    /// Get all available categories with article counts
+    /// Get all available categories with article counts.
     pub fn get_all_categories(&self) -> Result<Vec<(NewsCategory, usize)>> {
         let articles = self
             .articles
             .read()
             .map_err(|e| Error::cache(e.to_string()))?;
-        Ok(NewsCategory::all()
+
+        let mut result: Vec<(NewsCategory, usize)> = NewsCategory::builtin()
             .into_iter()
             .map(|cat| {
                 let count = articles.get(&cat).map(|v| v.len()).unwrap_or(0);
                 (cat, count)
             })
-            .collect())
+            .collect();
+
+        for (cat, arts) in articles.iter() {
+            if matches!(cat, NewsCategory::Custom(_)) {
+                result.push((cat.clone(), arts.len()));
+            }
+        }
+
+        Ok(result)
     }
 
     /// Get last update time for a category
@@ -512,5 +600,74 @@ impl NewsCache {
         updated.clear();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builtin_from_config_key() {
+        assert_eq!(NewsCategory::from_config_key("technology"), NewsCategory::Technology);
+        assert_eq!(NewsCategory::from_config_key("tech"), NewsCategory::Technology);
+        assert_eq!(NewsCategory::from_config_key("hackernews"), NewsCategory::HackerNews);
+    }
+
+    #[test]
+    fn test_custom_from_config_key() {
+        let cat = NewsCategory::from_config_key("my-custom-feed");
+        assert!(matches!(cat, NewsCategory::Custom(ref n) if n == "my-custom-feed"));
+    }
+
+    #[test]
+    fn test_custom_case_insensitive() {
+        let cat = NewsCategory::from_config_key("CISA-ALERTS");
+        assert!(matches!(cat, NewsCategory::Custom(ref n) if n == "cisa-alerts"));
+    }
+
+    #[test]
+    fn test_custom_serialize_roundtrip() {
+        let cat = NewsCategory::Custom("cisa".to_string());
+        let json = serde_json::to_string(&cat).unwrap();
+        assert_eq!(json, "\"cisa\"");
+        let back: NewsCategory = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cat);
+    }
+
+    #[test]
+    fn test_builtin_serialize() {
+        let cat = NewsCategory::Technology;
+        let json = serde_json::to_string(&cat).unwrap();
+        assert_eq!(json, "\"technology\"");
+        let back: NewsCategory = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, NewsCategory::Technology);
+    }
+
+    #[test]
+    fn test_custom_eq() {
+        let a = NewsCategory::Custom("cisa".to_string());
+        let b = NewsCategory::Custom("cisa".to_string());
+        let c = NewsCategory::Custom("other".to_string());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_from_str_never_fails() {
+        "anything".parse::<NewsCategory>().unwrap();
+        "".parse::<NewsCategory>().unwrap();
+        "!@#$".parse::<NewsCategory>().unwrap();
+    }
+
+    #[test]
+    fn test_builtin_count() {
+        assert_eq!(NewsCategory::builtin().len(), 34);
+    }
+
+    #[test]
+    fn test_config_key_custom() {
+        let cat = NewsCategory::Custom("my-feed".to_string());
+        assert_eq!(cat.config_key().as_ref(), "my-feed");
     }
 }

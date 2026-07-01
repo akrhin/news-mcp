@@ -264,7 +264,7 @@ impl NewsNowService {
             description,
             link,
             platform.name.to_string(),
-            platform.category,
+            platform.category.clone(),
             None, // NewsNow doesn't provide individual timestamps
             None,
         ))

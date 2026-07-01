@@ -68,6 +68,7 @@ pub fn init_logging(level: &str, enable_console: bool) {
             .with_env_filter(filter)
             .with_target(false)
             .with_thread_ids(false)
+            .with_writer(std::io::stderr)
             .init();
     }
 }

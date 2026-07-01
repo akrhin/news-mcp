@@ -122,7 +122,7 @@ impl NewsService {
                     description,
                     link,
                     source,
-                    category,
+                    category.clone(),
                     published_at,
                     author,
                 ))
@@ -143,9 +143,10 @@ impl NewsService {
         }
 
         // Fetch all URLs concurrently
+        let cat = category.clone();
         let futures: Vec<_> = urls
             .iter()
-            .map(|url| self.fetch_rss_feed(url, category))
+            .map(|url| self.fetch_rss_feed(url, cat.clone()))
             .collect();
 
         let results = futures::future::join_all(futures).await;
@@ -178,30 +179,49 @@ impl NewsService {
         Ok(all_articles)
     }
 
-    /// Fetch all categories concurrently
+    /// Fetch all categories (builtins + custom from config) concurrently
     pub async fn fetch_all_categories(
         &self,
     ) -> Result<std::collections::HashMap<NewsCategory, Vec<NewsArticle>>> {
-        let categories = NewsCategory::all();
+        let mut categories = NewsCategory::builtin();
+
+        // Add custom categories from config
+        if let Some(config) = &self.config {
+            for key in config.feeds.keys() {
+                let cat = NewsCategory::from_config_key(key);
+                if matches!(cat, NewsCategory::Custom(_)) && !categories.contains(&cat) {
+                    categories.push(cat);
+                }
+            }
+        }
         let mut results = std::collections::HashMap::new();
 
         // Use futures to fetch concurrently
         let futures: Vec<_> = categories
             .iter()
             .map(|category| {
-                let cat = *category;
+                let cat = category.clone();
+                let cat2 = cat.clone();
                 async move {
                     let articles = self.fetch_category(cat).await?;
-                    Ok::<_, Error>((cat, articles))
+                    Ok::<_, Error>((cat2, articles))
                 }
             })
             .collect();
 
-        // Execute all futures concurrently
-        let results_vec = futures::future::try_join_all(futures).await?;
+        // Execute all futures concurrently — each category independently
+        // (join_all, not try_join_all: a single bad feed must not kill all others)
+        let results_vec = futures::future::join_all(futures).await;
 
-        for (category, articles) in results_vec {
-            results.insert(category, articles);
+        for result in results_vec {
+            match result {
+                Ok((category, articles)) => {
+                    results.insert(category, articles);
+                }
+                Err(e) => {
+                    error!("Failed to fetch category: {}", e);
+                }
+            }
         }
 
         Ok(results)
