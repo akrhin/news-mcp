@@ -32,7 +32,7 @@ fn generate_id_from_url(url: &str) -> String {
 
 /// News category — can be a builtin (Technology, HackerNews, China News, NewsNow)
 /// or a user-defined custom category from config file.
-#[derive(Debug, Clone, Eq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub enum NewsCategory {
     // International
     Technology,
@@ -102,6 +102,15 @@ impl PartialEq for NewsCategory {
         match (self, other) {
             (Self::Custom(a), Self::Custom(b)) => a == b,
             _ => std::mem::discriminant(self) == std::mem::discriminant(other),
+        }
+    }
+}
+
+impl std::hash::Hash for NewsCategory {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        if let Self::Custom(name) = self {
+            name.hash(state);
         }
     }
 }
