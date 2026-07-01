@@ -88,8 +88,14 @@ pub fn create_default_registry(
     feeds: HashMap<String, FeedSourceConfig>,
 ) -> ToolRegistry {
     ToolRegistry::new()
-        .register(Box::new(GetNewsToolImpl::new(news_cache.clone(), feeds.clone())))
-        .register(Box::new(GetCategoriesToolImpl::new(news_cache.clone(), feeds)))
+        .register(Box::new(GetNewsToolImpl::new(
+            news_cache.clone(),
+            feeds.clone(),
+        )))
+        .register(Box::new(GetCategoriesToolImpl::new(
+            news_cache.clone(),
+            feeds,
+        )))
         .register(Box::new(GetArticleContentToolImpl::new(
             news_cache,
             article_cache,

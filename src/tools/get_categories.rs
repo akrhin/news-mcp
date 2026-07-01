@@ -42,10 +42,7 @@ impl GetCategoriesToolImpl {
     fn resolve_custom_category(&self, cat: &crate::cache::NewsCategory) -> (String, String) {
         let key = cat.config_key();
         if let Some(feed) = self.feeds.get(key.as_ref()) {
-            let name = feed
-                .display_name
-                .clone()
-                .unwrap_or_else(|| key.to_string());
+            let name = feed.display_name.clone().unwrap_or_else(|| key.to_string());
             let desc = feed
                 .description
                 .clone()
@@ -53,7 +50,10 @@ impl GetCategoriesToolImpl {
             (name, desc)
         } else {
             // fallback to the enum's own display_name/description
-            (cat.display_name().to_string(), cat.description().to_string())
+            (
+                cat.display_name().to_string(),
+                cat.description().to_string(),
+            )
         }
     }
 }
