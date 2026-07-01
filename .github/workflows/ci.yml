@@ -12,70 +12,44 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Code quality checks
+  # ── Code quality ──────────────────────────────────────────────────
   check:
-    name: Code Quality Checks
+    name: Code Quality
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+    - run: cargo fmt -- --check
+    - run: cargo clippy --all-targets -- -D warnings
 
-    - name: Check formatting
-      run: cargo fmt -- --check
-
-    - name: Run clippy
-      run: cargo clippy --all-targets -- -D warnings
-
-  # Security audit — dependency vulnerabilities
+  # ── Security: vulnerability audit ─────────────────────────────────
   security-audit:
-    name: Security Audit (cargo-audit)
+    name: Security Audit
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: taiki-e/install-action@cargo-audit
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - run: cargo audit
 
-    - name: Run cargo audit
-      run: |
-        cargo install cargo-audit
-        cargo audit
-
-  # Security deny — license compliance + advisory DB
+  # ── Security: licence + advisory deny ─────────────────────────────
   security-deny:
-    name: Security Deny (cargo-deny)
+    name: License/Advisory Deny
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: taiki-e/install-action@cargo-deny
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - run: cargo-deny check advisories
 
-    - name: Run cargo deny
-      run: |
-        cargo install cargo-deny
-        cargo deny check advisories
-
-  # Test on multiple OS
+  # ── Test (Linux + macOS) ──────────────────────────────────────────
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -84,52 +58,36 @@ jobs:
         os: [ubuntu-latest, macos-latest]
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - run: cargo build --verbose
+    - run: cargo test --verbose
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-stable-cargo-${{ hashFiles('**/Cargo.toml') }}
-
-    - name: Build
-      run: cargo build --verbose
-
-    - name: Test
-      run: cargo test --verbose
-
-  # Windows build
+  # ── Windows build ─────────────────────────────────────────────────
   build-windows:
     name: Build Windows
     runs-on: windows-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Build
-      run: cargo build --release --all-features
+    - run: cargo build --release
 
     - name: Verify binary
+      shell: pwsh
       run: |
         if (Test-Path target\release\news-mcp.exe) {
-          Write-Host "Binary compiled successfully for Windows"
+          Write-Host "OK: news-mcp.exe built"
         } else {
-          Write-Error "Binary not found for Windows"
+          Write-Error "Binary not found"
           exit 1
         }
 
-  # Cross-platform build matrix
+  # ── Cross-platform build ──────────────────────────────────────────
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -148,70 +106,44 @@ jobs:
             os: macos-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
       with:
         targets: ${{ matrix.target }}
-
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+    - uses: Swatinem/rust-cache@v2
 
     - name: Install cross
       if: matrix.cross
-      run: cargo install cross --git https://github.com/cross-rs/cross
+      uses: taiki-e/install-action@cross
 
-    - name: Build binary (native)
+    - name: Build (native)
       if: ${{ !matrix.cross }}
       run: cargo build --release --target ${{ matrix.target }}
 
-    - name: Build binary (cross)
+    - name: Build (cross)
       if: matrix.cross
       run: cross build --release --target ${{ matrix.target }}
 
-  # Documentation
+  # ── Docs ──────────────────────────────────────────────────────────
   docs:
     name: Documentation
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+    - run: cargo doc --no-deps --all-features
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-docs-cargo-${{ hashFiles('**/Cargo.toml') }}
-
-    - name: Build documentation
-      run: cargo doc --no-deps --all-features
-
-  # Docker build test (no push)
+  # ── Docker build test (no push) ───────────────────────────────────
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+    - uses: actions/checkout@v4
+    - uses: docker/setup-buildx-action@v3
 
     - name: Build Docker image
       run: |

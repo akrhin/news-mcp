@@ -77,7 +77,10 @@ pub enum NewsCategory {
 
 // ── Serialize: plain string ─────────────────────────────────────────────
 impl Serialize for NewsCategory {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         match self {
             Self::Custom(name) => serializer.serialize_str(name),
             other => serializer.serialize_str(other.config_key().as_ref()),
@@ -86,7 +89,9 @@ impl Serialize for NewsCategory {
 }
 
 impl<'de> Deserialize<'de> for NewsCategory {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Ok(Self::from_config_key(&s))
     }
@@ -609,9 +614,18 @@ mod tests {
 
     #[test]
     fn test_builtin_from_config_key() {
-        assert_eq!(NewsCategory::from_config_key("technology"), NewsCategory::Technology);
-        assert_eq!(NewsCategory::from_config_key("tech"), NewsCategory::Technology);
-        assert_eq!(NewsCategory::from_config_key("hackernews"), NewsCategory::HackerNews);
+        assert_eq!(
+            NewsCategory::from_config_key("technology"),
+            NewsCategory::Technology
+        );
+        assert_eq!(
+            NewsCategory::from_config_key("tech"),
+            NewsCategory::Technology
+        );
+        assert_eq!(
+            NewsCategory::from_config_key("hackernews"),
+            NewsCategory::HackerNews
+        );
     }
 
     #[test]
