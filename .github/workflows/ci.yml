@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,9 +41,9 @@ jobs:
     - name: Run clippy
       run: cargo clippy --all-targets -- -D warnings
 
-  # Security audit
-  security:
-    name: Security Audit
+  # Security audit — dependency vulnerabilities
+  security-audit:
+    name: Security Audit (cargo-audit)
     runs-on: ubuntu-latest
 
     steps:
@@ -57,14 +58,10 @@ jobs:
         cargo install cargo-audit
         cargo audit
 
-  # Test
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        rust: [stable]
+  # Security deny — license compliance + advisory DB
+  security-deny:
+    name: Security Deny (cargo-deny)
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
@@ -72,8 +69,26 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust }}
+
+    - name: Run cargo deny
+      run: |
+        cargo install cargo-deny
+        cargo deny check advisories
+
+  # Test on multiple OS
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Cache cargo
       uses: actions/cache@v4
@@ -82,7 +97,7 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           target
-        key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-stable-cargo-${{ hashFiles('**/Cargo.toml') }}
 
     - name: Build
       run: cargo build --verbose
@@ -114,7 +129,7 @@ jobs:
           exit 1
         }
 
-  # Cross-platform build matrix (no release upload)
+  # Cross-platform build matrix
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -198,8 +213,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image (scratch)
+    - name: Build Docker image
       run: |
-        # Create config.toml for Docker build (example config is fine)
         cp config.example.toml config.toml
         docker build -f Dockerfile.scratch -t news-mcp:local .
