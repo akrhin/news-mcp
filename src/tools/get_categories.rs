@@ -3,10 +3,12 @@
 //! Lists available news categories.
 
 use crate::cache::NewsCache;
+use crate::config::FeedSourceConfig;
 use crate::tools::Tool;
 use async_trait::async_trait;
 use rust_mcp_sdk::macros;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Get categories tool parameters
@@ -27,12 +29,32 @@ pub struct GetCategoriesTool {
 /// Get categories tool implementation
 pub struct GetCategoriesToolImpl {
     cache: Arc<NewsCache>,
+    feeds: HashMap<String, FeedSourceConfig>,
 }
 
 impl GetCategoriesToolImpl {
     /// Create a new get_categories tool
-    pub fn new(cache: Arc<NewsCache>) -> Self {
-        Self { cache }
+    pub fn new(cache: Arc<NewsCache>, feeds: HashMap<String, FeedSourceConfig>) -> Self {
+        Self { cache, feeds }
+    }
+
+    /// Look up display info for a Custom category from feeds config
+    fn resolve_custom_category(&self, cat: &crate::cache::NewsCategory) -> (String, String) {
+        let key = cat.config_key();
+        if let Some(feed) = self.feeds.get(key.as_ref()) {
+            let name = feed
+                .display_name
+                .clone()
+                .unwrap_or_else(|| key.to_string());
+            let desc = feed
+                .description
+                .clone()
+                .unwrap_or_else(|| format!("User-defined feed: {key}"));
+            (name, desc)
+        } else {
+            // fallback to the enum's own display_name/description
+            (cat.display_name().to_string(), cat.description().to_string())
+        }
     }
 }
 
@@ -57,12 +79,16 @@ impl Tool for GetCategoriesToolImpl {
         output.push_str("# Available News Categories\n\n");
 
         for (category, count) in categories {
-            output.push_str(&format!(
-                "- **{}** ({} articles)\n",
-                category.display_name(),
-                count
-            ));
-            output.push_str(&format!("  {}\n\n", category.description()));
+            let (name, desc) = if matches!(category, crate::cache::NewsCategory::Custom(_)) {
+                self.resolve_custom_category(&category)
+            } else {
+                (
+                    category.display_name().to_string(),
+                    category.description().to_string(),
+                )
+            };
+            output.push_str(&format!("- **{name}** ({count} articles)\n"));
+            output.push_str(&format!("  {desc}\n\n"));
         }
 
         Ok(rust_mcp_sdk::schema::CallToolResult::text_content(vec![

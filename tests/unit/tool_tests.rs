@@ -277,7 +277,7 @@ async fn test_get_news_empty_cache() {
 #[test]
 fn test_get_categories_tool_definition() {
     let cache = create_test_cache();
-    let tool = GetCategoriesToolImpl::new(cache);
+    let tool = GetCategoriesToolImpl::new(cache, HashMap::new());
 
     let definition = tool.definition();
     assert_eq!(definition.name, "get_categories");
@@ -286,7 +286,7 @@ fn test_get_categories_tool_definition() {
 #[tokio::test]
 async fn test_get_categories_tool() {
     let cache = create_test_cache();
-    let tool = GetCategoriesToolImpl::new(cache);
+    let tool = GetCategoriesToolImpl::new(cache, HashMap::new());
 
     let result = tool.execute(serde_json::json!({})).await.unwrap();
     let text = get_text_content(&result);
@@ -298,7 +298,7 @@ async fn test_get_categories_tool() {
 #[tokio::test]
 async fn test_get_categories_all_present() {
     let cache = create_test_cache();
-    let tool = GetCategoriesToolImpl::new(cache);
+    let tool = GetCategoriesToolImpl::new(cache, HashMap::new());
 
     let result = tool.execute(serde_json::json!({})).await.unwrap();
     let text = get_text_content(&result);
@@ -318,7 +318,7 @@ async fn test_get_categories_all_present() {
 #[tokio::test]
 async fn test_get_categories_empty_cache() {
     let cache = create_empty_cache();
-    let tool = GetCategoriesToolImpl::new(cache);
+    let tool = GetCategoriesToolImpl::new(cache, HashMap::new());
 
     let result = tool.execute(serde_json::json!({})).await.unwrap();
     let text = get_text_content(&result);
@@ -336,7 +336,7 @@ async fn test_multiple_tools_workflow() {
     let cache = create_test_cache();
 
     // Get categories
-    let categories_tool = GetCategoriesToolImpl::new(cache.clone());
+    let categories_tool = GetCategoriesToolImpl::new(cache.clone(), HashMap::new());
     let result = categories_tool
         .execute(serde_json::json!({}))
         .await
