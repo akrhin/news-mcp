@@ -95,37 +95,49 @@ enabled = true
 ```mermaid
 flowchart LR
     subgraph Client["Клиент"]
-        C[Claude Desktop / HTTP]
+        C[Claude / HTTP / MCP]
     end
     subgraph Server["News MCP Server"]
-        T[Transport<br/>stdio / http / sse / hybrid]
-        H[MCP Handler]
+        T[Transport → Handler]
         TR[Tool Registry]
         Cache[("Кеш (RwLock)<br/>HashMap<Category, Articles>")]
         Poller[Фоновый опрос<br/>интервал: 3600s]
         NS[NewsService<br/>RSS / Atom]
         NNS[NewsNowService<br/>JSON API]
+        AC[("ArticleCache (RwLock)<br/>HashMap<URL, Content>")]
     end
     subgraph Sources["Источники"]
-        RSS[TechCrunch, Ars Technica,<br/>CISA, Debian Security,<br/>Пользовательские ленты ...]
+        RSS[TechCrunch, CISA, Debian,<br/>Пользовательские ленты ...]
         NewsNow[微博热搜, 百度热搜,<br/>知乎热榜, ...]
     end
 
     C --> T
-    T --> H
-    H --> TR
+    T --> TR
     TR <--> Cache
-    Cache -.-> Poller
+    TR <--> AC
     Poller --> NS
     Poller --> NNS
     NS --> RSS
     NNS --> NewsNow
+    NS -.-> Cache
+    NNS -.-> Cache
+
+    style C fill:#e1f5fe
+    style T fill:#e8f5e9
+    style Cache fill:#fff3e0
+    style AC fill:#fff3e0
+    style Poller fill:#f3e5f5
+    style NS fill:#e0f2f1
+    style NNS fill:#e0f2f1
 ```
 
 **Поток данных:**
-1. Запрос клиента → Transport → Handler → Tool Registry читает из кеша
-2. Если кеш пуст → Poller → NewsService / NewsNowService запрашивают данные → кеш обновляется
-3. Poller работает в фоне по расписанию, не блокируя старт сервера
+1. **Чтение:** Клиент → Transport → Tool Registry → читает из кеша (мгновенно, без ожидания)
+2. **Обновление:** Poller тикает независимо по таймеру → NewsService/NewsNowService фетчат → пишут в кеш
+3. **Полный текст:** `get_article_content` проверяет ArticleCache по URL; при промахе забирает HTML, кеширует в оба кеша (ArticleCache + NewsArticle.content)
+
+Политика: поллер **никогда не блокирует старт** и **не вызывается промахом кеша** — кеш заполняется только на тиках поллера. До первого опроса все категории возвращают 0 статей.
+
 
 Подробнее: [ARCHITECTURE.md](ARCHITECTURE.md).
 

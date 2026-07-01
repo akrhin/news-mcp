@@ -91,11 +91,23 @@ News MCP Server 是一个基于 Rust 的 MCP 服务器，从多个 RSS 源和 AP
 
 ### 1. Cache Layer (`src/cache/`)
 
-**Responsibility**: Thread-safe in-memory storage for news articles.
+**Responsibility**: Thread-safe in-memory storage for news articles. **No persistence to disk.**
 
-**职责**: 线程安全的内存新闻文章存储。
+**职责**: 线程安全的内存新闻文章存储。**不持久化到磁盘。**
 
-**Implementation**:
+**Обязанность**: Потокобезопасное хранение новостных статей в оперативной памяти. **Без сохранения на диск.**
+
+The server maintains **two independent in-memory caches**:
+
+Сервер поддерживает **два независимых кеша в памяти**:
+
+| Cache | Struct | Key | Value | Purpose / Назначение |
+|-------|--------|-----|-------|----------------------|
+| **NewsCache** | `RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>` | Category | Article list | Per-category metadata index / Индекс метаданных по категориям |
+| **ArticleCache** | `RwLock<HashMap<String, CachedArticle>>` | URL | Full text | Per-URL full article content / Полный текст статьи по URL |
+
+#### NewsCache
+
 ```rust
 pub struct NewsCache {
     articles: RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>,
@@ -103,6 +115,12 @@ pub struct NewsCache {
     max_articles_per_category: usize,
 }
 ```
+
+Articles hold **metadata only** on initial fetch (title, description, link, source). The `content` field starts as `None` — filled lazily on first `get_article_content` call. The poller **replaces** the entire category list on each cycle (no incremental merge).
+
+文章在初始获取时只包含**元数据**（标题、描述、链接、来源）。`content` 字段初始为 `None` — 在首次调用 `get_article_content` 时惰性填充。轮询器每次循环**替换**整个类别的文章列表（无增量合并）。
+
+При первичной загрузке статьи содержат только **метаданные** (заголовок, описание, ссылка, источник). Поле `content` изначально `None` — заполняется **лениво**, при первом вызове `get_article_content`. Поллер **заменяет** весь список категории целиком каждый цикл (без инкрементального слияния).
 
 **Key Features**:
 - Thread-safe via `RwLock` (allows concurrent reads)
@@ -115,6 +133,51 @@ pub struct NewsCache {
 - 按类别存储，可配置限制
 - 时间戳跟踪数据新鲜度
 - 支持标题/描述全文搜索
+
+#### ArticleCache (`src/cache/article_cache.rs`)
+
+```rust
+pub struct ArticleCache {
+    articles: RwLock<HashMap<String, CachedArticle>>,
+    max_articles: usize,
+}
+```
+
+Where `CachedArticle` stores:
+- `content: String` — cleaned plain text from HTML
+- `fetched_at: DateTime<Utc>` — timestamp for eviction ordering
+- `word_count: usize` — computed on insertion
+
+**Lazy loading:** `get_article_content(id)` first checks ArticleCache by resolved URL. On miss, fetches HTML, extracts text, stores in **both** caches (ArticleCache + NewsArticle.content). Subsequent calls serve from memory in microseconds.
+
+**Eviction (FIFO by age):** At capacity (default 100 articles), the oldest entry (by `fetched_at`) is evicted when a new URL arrives.
+
+**惰性加载:** `get_article_content(id)` 首先按解析后的 URL 检查 ArticleCache。未命中时，获取 HTML，提取文本，存储在**两个**缓存中（ArticleCache + NewsArticle.content）。后续调用在微秒内从内存返回。
+
+**淘汰策略（按时间的 FIFO）:** 当缓存达到容量上限（默认 100 篇文章）时，新 URL 到达时最旧的条目（按 `fetched_at`）将被淘汰。
+
+**Ленивая загрузка:** `get_article_content(id)` сначала проверяет ArticleCache по URL. При промахе — забирает HTML, извлекает текст, сохраняет в **оба** кеша (ArticleCache + NewsArticle.content). Последующие вызовы отдают из памяти за микросекунды.
+
+**Вытеснение (FIFO по времени):** При заполнении кеша (по умолчанию 100 статей) самая старая запись (по `fetched_at`) удаляется при добавлении нового URL.
+
+#### Persistence / 持久化 / Персистентность
+
+**Why no disk? / 为什么要使用无持久化设计? / Почему не храним на диске?**
+
+Simplicity and resource footprint. The MCP server is ephemeral — designed to run alongside an AI assistant session. RSS feeds poll hourly, so at most one hour of content is lost on restart. Full article text persistence would require a bounded SQLite store with cleanup logic, adding complexity for marginal gain given the use case.
+
+简单性和资源占用。MCP 服务器是临时的——设计为伴随 AI 助手会话运行。RSS 源每小时轮询一次，重启时最多丢失一小时的缓存内容。完整文章文本的持久化需要带清理逻辑的有界 SQLite 存储，考虑到使用场景，增加复杂性的收益有限。
+
+Простота и экономия ресурсов. MCP-сервер эфемерен — он спроектирован для работы рядом с сессией AI-ассистента. RSS-ленты опрашиваются раз в час, так что при перезапуске теряется не больше часа контента. Постоянное хранение полных текстов потребовало бы SQLite с логикой очистки, что добавляет сложности без ощутимой выгоды в данном сценарии.
+
+**Cache lifecycle / 缓存生命周期 / Жизненный цикл кеша:**
+
+| Event / Событие | NewsCache | ArticleCache |
+|-------|-----------|--------------|
+| Server start / Запуск сервера | Empty / Пуст | Empty / Пуст |
+| First poll cycle / Первый цикл поллинга | Populated (metadata only) | Still empty / Всё ещё пуст |
+| First `get_article_content` per URL / Первый запрос контента статьи | Content field filled / Поле content заполнено | URL entry added / Добавлена запись по URL |
+| Server restart / Перезапуск сервера | **Lost / Потерян** | **Lost / Потерян** |
 
 ### 2. Poller (`src/poller/`)
 

@@ -99,33 +99,50 @@ See [config.example.toml](config.example.toml) for the full reference.
 ## Architecture
 
 ```mermaid
-sequenceDiagram
-    participant C as Client (Claude/HTTP)
-    participant S as Transport → Handler
-    participant T as Tool Registry
-    participant Ca as Cache (RwLock)
-    participant P as Poller
-    participant NS as NewsService
-    participant R as RSS Feeds
-    participant N as NewsNow API
-
-    C->>S: get_news/categories
-    S->>T: dispatch
-    T->>Ca: read
-    alt cache hit
-        Ca-->>C: cached articles
-    else cache miss
-        Ca->>P: trigger poll
-        P->>NS: fetch_rss_feed()
-        NS->>R: HTTP GET
-        NS->>N: HTTP GET
-        R-->>NS: RSS/Atom XML
-        N-->>NS: hot search data
-        NS->>NS: decode & parse
-        NS->>Ca: store articles
-        Ca-->>C: fresh articles
+flowchart LR
+    subgraph Client["Client"]
+        C[Claude / HTTP / MCP]
     end
+    subgraph Server["News MCP Server"]
+        T[Transport → Handler]
+        TR[Tool Registry]
+        Cache[("Cache (RwLock)<br/>HashMap<Category, Articles>")]
+        Poller[Background Poller<br/>interval: 3600s]
+        NS[NewsService<br/>RSS / Atom]
+        NNS[NewsNowService<br/>JSON API]
+        AC[("ArticleCache (RwLock)<br/>HashMap<URL, Content>")]
+    end
+    subgraph Sources["Sources"]
+        RSS[TechCrunch, CISA, Debian,<br/>Custom Feeds ...]
+        NewsNow[微博热搜, 百度热搜,<br/>知乎热榜, ...]
+    end
+
+    C --> T
+    T --> TR
+    TR <--> Cache
+    TR <--> AC
+    Poller --> NS
+    Poller --> NNS
+    NS --> RSS
+    NNS --> NewsNow
+    NS -.-> Cache
+    NNS -.-> Cache
+
+    style C fill:#e1f5fe
+    style T fill:#e8f5e9
+    style Cache fill:#fff3e0
+    style AC fill:#fff3e0
+    style Poller fill:#f3e5f5
+    style NS fill:#e0f2f1
+    style NNS fill:#e0f2f1
 ```
+
+**Flow:**
+1. **Read path:** Client → Transport → Tool Registry → reads from Cache (instant, no waiting)
+2. **Update path:** Poller ticks independently on interval → NewsService/NewsNowService fetch → write into Cache
+3. **Full text:** `get_article_content` checks ArticleCache by URL; on miss, fetches HTML, caches in both ArticleCache + NewsArticle.content
+
+The poller **never blocks startup** and is **not triggered by cache misses** — the cache is filled on poller ticks only. Before the first poll, all categories return 0 articles.
 
 Three layers:
 

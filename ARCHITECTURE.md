@@ -65,31 +65,79 @@ flowchart LR
 
 ### 1. Cache Layer (`src/cache/`)
 
-In-memory article store using `RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>`.
+**In-memory only — no persistence to disk.**
 
-**Key struct — `NewsCategory`:**
+The server runs two independent in-memory caches:
+
+| Cache | Struct | Key | Value | Scope |
+|-------|--------|-----|-------|-------|
+| **NewsCache** | `RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>` | NewsCategory (enum) | List of articles | Per-category article index |
+| **ArticleCache** | `RwLock<HashMap<String, CachedArticle>>` | URL (String) | Full content + metadata | Per-URL full text |
+
+Both use `RwLock` (multiple concurrent readers, single writer) — all MCP tools read, only the background poller writes.
+
+#### NewsCache
+
+Articles stored by category, with a **hard cap per category** (`max_articles_per_category`, default 100). When the poller inserts a new batch, it takes only the first N articles. There is **no eviction** — the poller atomically replaces the entire category's list on each cycle.
+
 ```rust
-pub enum NewsCategory {
-    // Built-in categories (Technology, Science, HackerNews, 21 China News, 11 NewsNow)
-    Technology,
-    Science,
-    HackerNews,
-    Instant,
-    // ... 40+ built-in variants
-
-    /// User-defined category from config [feeds.<name>].
-    /// The string is the config key (e.g. "cisa", "thehackernews").
-    Custom(String),
+pub struct NewsCache {
+    articles: RwLock<HashMap<NewsCategory, Vec<NewsArticle>>>,
+    last_updated: RwLock<HashMap<NewsCategory, DateTime<Utc>>>,
+    max_articles_per_category: usize,
 }
 ```
 
-Custom categories are parsed via `from_config_key()` — unknown keys become `Custom(key)` automatically.
+Each `NewsArticle` holds **metadata only** on initial fetch (title, description, link, source, published_at). The `content` field starts as `None` — it is filled **lazily** when `get_article_content` is called for the first time.
 
 **Cache methods:**
 - `get_category_news(&Category) -> Vec<NewsArticle>` — read articles for a category
 - `set_category_news(Category, Vec<NewsArticle>)` — write articles (truncates to `max_articles_per_category`)
 - `get_all_categories() -> Vec<(Category, usize)>` — returns builtins (with counts) + any Custom categories that have cached data
 - `search(query, Category?) -> Vec<NewsArticle>` — full-text search over title/description
+
+#### ArticleCache
+
+Full article text, cached by URL. Introduced in `src/cache/article_cache.rs`.
+
+```rust
+pub struct ArticleCache {
+    articles: RwLock<HashMap<String, CachedArticle>>,
+    max_articles: usize,
+}
+```
+
+Where `CachedArticle` stores:
+- `content: String` — cleaned plain text extracted from article HTML
+- `fetched_at: DateTime<Utc>` — when the content was fetched (used for eviction)
+- `word_count: usize` — computed on insertion
+
+**Lazy content loading:** When a client calls `get_article_content(id)`, the server first checks the ArticleCache by resolved URL. On miss, it fetches the HTML, extracts text content, stores it in **both** caches (ArticleCache by URL, and back into the NewsArticle's `content` field), then returns it. On subsequent calls, returns from cache instantly.
+
+**Eviction policy (FIFO by age):** When the cache is full (`max_articles`, default 100) and a new URL is inserted, the oldest entry (by `fetched_at`) is evicted to make room. This is a bounded LRU-like policy — once fetched, content stays until the cache fills and a newer URL displaces it.
+
+#### What Happens on Restart
+
+| Step | State |
+|------|-------|
+| Server starts | Both caches are **empty** |
+| First poll cycle completes | NewsCache populated with article metadata (titles, descriptions). ArticleCache still empty |
+| First `get_article_content` call for a URL | ArticleCache populates that URL |
+| Server restarts | **Everything lost**. Both caches start from empty |
+
+This means:
+- Before the first poll cycle (up to `interval_secs`, default 60s for initial poll), `get_news` returns 0 articles for all categories
+- After restart, all previously fetched full content is gone — `get_article_content` re-fetches from source
+- A **second poll cycle** (first refresh) is **not** needed — the initial poll already fills the cache
+
+#### Persistence Design Decision
+
+**Why no disk storage?** Simplicity and resource footprint. The MCP server is meant to run alongside an AI assistant session — ephemeral by nature. RSS feeds are polled hourly, so at most one hour of content is "lost" on restart. Full article content would require a bounded SQLite database with cleanup logic, adding complexity for marginal gain given the use case.
+
+If persistence becomes necessary, the recommended approach is:
+1. Add optional SQLite via `rusqlite` behind a `NewsCache` trait
+2. Enable via config flag `cache.backend = "sqlite"` / `"memory"`
+3. Both backends share the same interface — swap at startup
 
 ### 2. Background Poller (`src/poller/`)
 
