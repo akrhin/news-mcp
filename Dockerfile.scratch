@@ -64,6 +64,9 @@ ENV NEWS_MCP_TRANSPORT=http
 ENV NEWS_MCP_POLL_INTERVAL=3600
 ENV NEWS_MCP_LOG_LEVEL=info
 
+# Copy example config as fallback so --config path exists even without volume mount
+COPY config.example.toml /etc/news-mcp/config.toml
+
 # 声明配置卷 (可选挂载)
 VOLUME ["/etc/news-mcp"]
 
@@ -72,4 +75,4 @@ EXPOSE 8080
 
 # 入口点 - 尝试加载配置文件，如果不存在则使用默认配置
 ENTRYPOINT ["news-mcp"]
-CMD ["serve", "--config", "/etc/news-mcp/config.toml"]
+CMD ["serve", "-c", "/etc/news-mcp/config.toml", "--log-level", "info"]

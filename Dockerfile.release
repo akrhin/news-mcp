@@ -29,8 +29,8 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 # TARGETARCH values: amd64, arm64 (set automatically by docker buildx)
 COPY binaries/news-mcp-${TARGETARCH} /app/news-mcp
 
-# Copy default configuration as fallback (optional, can be overridden by volume mount)
-COPY config.toml /etc/news-mcp/config.toml
+# Copy example configuration as fallback (optional, can be overridden by volume mount)
+COPY config.example.toml /etc/news-mcp/config.toml
 
 # Set working directory
 WORKDIR /app
@@ -56,4 +56,4 @@ VOLUME ["/etc/news-mcp"]
 # Config file at /etc/news-mcp/config.toml is used if it exists
 # If config file doesn't exist or is inaccessible, server uses env vars + defaults
 ENTRYPOINT ["/app/news-mcp"]
-CMD ["serve", "--config", "/etc/news-mcp/config.toml"]
+CMD ["serve", "-c", "/etc/news-mcp/config.toml", "--log-level", "info"]
