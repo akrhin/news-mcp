@@ -19,48 +19,46 @@ News MCP Server is a Rust implementation of the Model Context Protocol (MCP) tha
 
 ## Component Diagram
 
+```mermaid
+flowchart LR
+    subgraph Client["Client"]
+        C[Claude Desktop / HTTP]
+    end
+    subgraph Server["News MCP Server"]
+        T[Transport<br/>stdio / http / sse / hybrid]
+        H[MCP Handler]
+        TR[Tool Registry]
+        Cache[("Cache (RwLock)<br/>HashMap<Category, Articles>")]
+        Poller[Background Poller<br/>interval: 3600s]
+        NS[NewsService<br/>RSS / Atom]
+        NNS[NewsNowService<br/>JSON API]
+    end
+    subgraph Sources["Sources"]
+        RSS[TechCrunch, Ars Technica,<br/>CISA, Debian Security,<br/>Custom Feeds ...]
+        NewsNow[微博热搜, 百度热搜,<br/>知乎热榜, ...]
+    end
+
+    C --> T
+    T --> H
+    H --> TR
+    TR <--> Cache
+    Cache -.-> Poller
+    Poller --> NS
+    Poller --> NNS
+    NS --> RSS
+    NNS --> NewsNow
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         News MCP Server                             │
-│                                                                     │
-│  ┌──────────┐  ┌──────────────┐  ┌──────────────────────────────┐  │
-│  │ Transport │─▶│  MCP Handler │─▶│      Tool Registry           │  │
-│  │(stdio/http│  │              │  │  ┌─────────┐ ┌─────────────┐ │  │
-│  │ sse/hybrid)│  │              │  │  │get_news │ │get_categories│ │  │
-│  └──────────┘  └──────────────┘  │  ├─────────┤ ├─────────────┤ │  │
-│                                  │  │get_artic│ │              │ │  │
-│                                  │  │le_content│ │              │ │  │
-│                                  │  └────▲─────┘ └──────▲──────┘ │  │
-│                                  └────────┼──────────────┼────────┘  │
-│                                           │              │          │
-│  ┌────────────────────────────────────────┴──────────────┴──────┐   │
-│  │                        Cache (RwLock)                         │   │
-│  │  HashMap<NewsCategory, Vec<NewsArticle>>                      │   │
-│  │  HashMap<NewsCategory, DateTime<Utc>>   ← lastUpdated        │   │
-│  └────────────────────────────────────────┬──────────────────────┘   │
-│                                           │                          │
-│  ┌────────────────────────────────────────┴──────────────────────┐   │
-│  │                     Background Poller                         │   │
-│  │  Fetches all categories (builtin + custom) concurrently       │   │
-│  │  on a configurable interval (default 3600s)                   │   │
-│  └────────────────────────────────────────┬──────────────────────┘   │
-│                                           │                          │
-└───────────────────────────────────────────┼──────────────────────────┘
-                                            │
-                 ┌──────────────────────────┼──────────────────────┐
-                 │                          │                      │
-         ┌───────┴──────┐          ┌────────┴────────┐            │
-         │  NewsService  │          │ NewsNowService  │  (future)  │
-         │  (RSS/Atom)   │          │  (JSON API)     │  sources   │
-         └───────┬───────┘          └────────┬────────┘            │
-                 │                          │                      │
-        ┌────────┴────────┐        ┌────────┴────────┐            │
-        │ TechCrunch      │        │ 微博热搜        │            │
-        │ Ars Technica    │        │ 百度热搜        │            │
-        │ CISA            │        │ 知乎热榜        │            │
-        │ Debian Security │        │ ...             │            │
-        │ Custom Feeds    │        └─────────────────┘            │
-        └─────────────────┘                                       │
+
+**Flow:**
+1. Client request → Transport → Handler → Tool Registry reads from Cache
+2. Cache miss → Poller triggered → NewsService / NewsNowService fetch → Cache updated
+3. Poller runs on background interval, never blocks startup
+
+### Resolution Strategy
+1. Builtin enum variants (Technology, Science, etc.) always exist
+2. Config keys that match builtin aliases resolve to builtin
+3. Unknown config keys → `NewsCategory::Custom(key)`
+4. Custom categories appear after first successful poll cycle
 </pre>
 
 ## Core Components

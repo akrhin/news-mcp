@@ -98,27 +98,40 @@ See [config.example.toml](config.example.toml) for the full reference.
 
 ## Architecture
 
+```mermaid
+sequenceDiagram
+    participant C as Client (Claude/HTTP)
+    participant S as Transport → Handler
+    participant T as Tool Registry
+    participant Ca as Cache (RwLock)
+    participant P as Poller
+    participant NS as NewsService
+    participant R as RSS Feeds
+    participant N as NewsNow API
+
+    C->>S: get_news/categories
+    S->>T: dispatch
+    T->>Ca: read
+    alt cache hit
+        Ca-->>C: cached articles
+    else cache miss
+        Ca->>P: trigger poll
+        P->>NS: fetch_rss_feed()
+        NS->>R: HTTP GET
+        NS->>N: HTTP GET
+        R-->>NS: RSS/Atom XML
+        N-->>NS: hot search data
+        NS->>NS: decode & parse
+        NS->>Ca: store articles
+        Ca-->>C: fresh articles
+    end
 ```
-┌──────────────┐     ┌─────────────────────────────────────┐
-│   Client     │     │         News MCP Server             │
-│ (Claude/HTTP)│────▶│  Transport → Handler → ToolRegistry │
-└──────────────┘     │       ↓          ↓          ↓       │
-                     │  get_news  get_categories  get_...   │
-                     │       ↓                            │
-                     │  ┌──────────────┐                  │
-                     │  │ Cache (RwLock)│◀── Poller       │
-                     │  └──────────────┘     │            │
-                     │                  ┌────┴─────┐      │
-                     │                  │ NewsService│    │
-                     │                  └────┬─────┘      │
-                     └──────────────────────┼─────────────┘
-                                            │
-                    ┌───────────────────────┼───────────────────┐
-                    │  RSS Feeds            │   NewsNow API     │
-                    │  (TechCrunch, CISA,   │   (微博热搜, ...) │
-                    │   Debian, Custom...)  │                   │
-                    └───────────────────────┴───────────────────┘
-```
+
+Three layers:
+
+1. **Transport** — HTTP, SSE, stdio, hybrid. Routes requests to Tool Registry.
+2. **Core** — Cache + Poller + NewsService. Poller ticks on interval, fetches via NewsService, stores in RwLock cache.
+3. **Sources** — RSS feeds (TechCrunch, CISA, Debian, custom) and NewsNow API (微博热搜, etc.).
 
 ## MCP Tools
 

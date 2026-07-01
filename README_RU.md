@@ -92,27 +92,40 @@ enabled = true
 
 ## Архитектура
 
+```mermaid
+flowchart LR
+    subgraph Client["Клиент"]
+        C[Claude Desktop / HTTP]
+    end
+    subgraph Server["News MCP Server"]
+        T[Transport<br/>stdio / http / sse / hybrid]
+        H[MCP Handler]
+        TR[Tool Registry]
+        Cache[("Кеш (RwLock)<br/>HashMap<Category, Articles>")]
+        Poller[Фоновый опрос<br/>интервал: 3600s]
+        NS[NewsService<br/>RSS / Atom]
+        NNS[NewsNowService<br/>JSON API]
+    end
+    subgraph Sources["Источники"]
+        RSS[TechCrunch, Ars Technica,<br/>CISA, Debian Security,<br/>Пользовательские ленты ...]
+        NewsNow[微博热搜, 百度热搜,<br/>知乎热榜, ...]
+    end
+
+    C --> T
+    T --> H
+    H --> TR
+    TR <--> Cache
+    Cache -.-> Poller
+    Poller --> NS
+    Poller --> NNS
+    NS --> RSS
+    NNS --> NewsNow
 ```
-┌──────────────┐     ┌─────────────────────────────────────┐
-│   Клиент     │     │         News MCP Server             │
-│ (Claude/HTTP)│────▶│  Transport → Handler → ToolRegistry │
-└──────────────┘     │       ↓          ↓          ↓       │
-                     │  get_news  get_categories  get_...   │
-                     │       ↓                            │
-                     │  ┌──────────────┐                  │
-                     │  │ Кеш (RwLock) │◀── Poller        │
-                     │  └──────────────┘     │            │
-                     │                  ┌────┴─────┐      │
-                     │                  │ NewsService│    │
-                     │                  └────┬─────┘      │
-                     └──────────────────────┼─────────────┘
-                                            │
-                    ┌───────────────────────┼───────────────────┐
-                    │  RSS-ленты            │   NewsNow API     │
-                    │  (TechCrunch, CISA,   │   (微博热搜, ...) │
-                    │   Debian, Custom...)  │                   │
-                    └───────────────────────┴───────────────────┘
-```
+
+**Поток данных:**
+1. Запрос клиента → Transport → Handler → Tool Registry читает из кеша
+2. Если кеш пуст → Poller → NewsService / NewsNowService запрашивают данные → кеш обновляется
+3. Poller работает в фоне по расписанию, не блокируя старт сервера
 
 Подробнее: [ARCHITECTURE.md](ARCHITECTURE.md).
 

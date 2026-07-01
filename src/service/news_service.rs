@@ -72,7 +72,8 @@ impl NewsService {
         }
 
         let content = response.bytes().await?;
-        self.parse_feed(&content, category)
+        let decoded = crate::utils::decode_xml_bytes(&content);
+        self.parse_feed(decoded.as_bytes(), category)
     }
 
     /// Parse RSS/Atom feed content into articles
