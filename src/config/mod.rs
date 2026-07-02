@@ -431,16 +431,24 @@ pub struct ArticleFetchConfig {
     /// HTTP request timeout in seconds for fetching article content
     #[serde(default = "default_fetch_timeout")]
     pub fetch_timeout_secs: u64,
+    /// Max chars of article content returned to client (default: 2000)
+    #[serde(default = "default_max_chars")]
+    pub max_chars: usize,
 }
 
 fn default_fetch_timeout() -> u64 {
     10
 }
 
+fn default_max_chars() -> usize {
+    2000
+}
+
 impl Default for ArticleFetchConfig {
     fn default() -> Self {
         Self {
             fetch_timeout_secs: default_fetch_timeout(),
+            max_chars: default_max_chars(),
         }
     }
 }

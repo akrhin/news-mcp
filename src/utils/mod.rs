@@ -117,6 +117,40 @@ pub fn format_articles_as_json(articles: &[crate::cache::NewsArticle]) -> String
     serde_json::to_string_pretty(articles).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Format articles as compact one-liner (minimal context cost)
+pub fn format_articles_as_compact(articles: &[crate::cache::NewsArticle]) -> String {
+    if articles.is_empty() {
+        return "No articles found.".to_string();
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "_{}_ — {} articles_\n\n",
+        articles[0].category.display_name(),
+        articles.len(),
+    ));
+
+    for article in articles {
+        output.push_str(&format!("- **{}**", article.title));
+        output.push_str(&format!(" | {}", article.source));
+        if let Some(date) = &article.published_at {
+            output.push_str(&format!(" | {}", date.format("%Y-%m-%d")));
+        }
+        output.push_str(&format!(" | ID: {}", article.id));
+        output.push_str(&format!(" — [link]({})", article.link));
+        output.push('\n');
+        // One-line description if present (truncated to 120 chars)
+        if let Some(desc) = &article.description {
+            let first_line = desc.lines().next().unwrap_or(desc);
+            let truncated: String = first_line.chars().take(120).collect();
+            let suffix = if first_line.len() > 120 { "…" } else { "" };
+            output.push_str(&format!("  _{}{}_\n", truncated, suffix));
+        }
+    }
+
+    output
+}
+
 /// Format articles as plain text
 pub fn format_articles_as_text(articles: &[crate::cache::NewsArticle]) -> String {
     if articles.is_empty() {

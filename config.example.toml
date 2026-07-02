@@ -33,6 +33,7 @@ interval_secs = 600          # 10 min — good for security feeds
 # ── Article Content Fetcher ──────────────────────────────────────────────────
 [article_fetch]
 fetch_timeout_secs = 10
+max_chars = 2000      # max chars of article content returned to client (default: 2000)
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 [logging]

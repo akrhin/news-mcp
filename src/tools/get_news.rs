@@ -5,7 +5,10 @@
 use crate::cache::{NewsCache, NewsCategory};
 use crate::config::FeedSourceConfig;
 use crate::tools::Tool;
-use crate::utils::{format_articles_as_json, format_articles_as_markdown, format_articles_as_text};
+use crate::utils::{
+    format_articles_as_compact, format_articles_as_json, format_articles_as_markdown,
+    format_articles_as_text,
+};
 use async_trait::async_trait;
 use rust_mcp_sdk::macros;
 use rust_mcp_sdk::schema::{ToolAnnotations, ToolInputSchema};
@@ -46,9 +49,9 @@ pub struct GetNewsTool {
     /// Output format
     #[json_schema(
         title = "Format",
-        description = "Output format (markdown, json, text)",
+        description = "Output format (markdown, json, text, compact)",
         default = "markdown",
-        enum_values = ["markdown", "json", "text"]
+        enum_values = ["markdown", "json", "text", "compact"]
     )]
     pub format: Option<String>,
 }
@@ -135,12 +138,12 @@ impl GetNewsToolImpl {
         format_prop.insert("title".to_string(), serde_json::json!("Format"));
         format_prop.insert(
             "description".to_string(),
-            serde_json::json!("Output format (markdown, json, text)"),
+            serde_json::json!("Output format (markdown, json, text, compact)"),
         );
         format_prop.insert("default".to_string(), serde_json::json!("markdown"));
         format_prop.insert(
             "enum".to_string(),
-            serde_json::json!(["markdown", "json", "text"]),
+            serde_json::json!(["markdown", "json", "text", "compact"]),
         );
         properties.insert("format".to_string(), format_prop);
 
@@ -209,6 +212,7 @@ impl Tool for GetNewsToolImpl {
             "markdown" => format_articles_as_markdown(&limited_articles),
             "json" => format_articles_as_json(&limited_articles),
             "text" => format_articles_as_text(&limited_articles),
+            "compact" => format_articles_as_compact(&limited_articles),
             _ => {
                 return Err(rust_mcp_sdk::schema::CallToolError::from_message(format!(
                     "Invalid format: {}",

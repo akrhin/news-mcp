@@ -1,6 +1,6 @@
-# CLAUDE.md
+# CLAUDE.md — инструкции для AI-ассистента
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Этот файл содержит информацию, необходимую LLM (Claude Code, Hermes, Cursor) для корректной работы с кодом репозитория. Агент обязан прочитать этот файл перед тем, как писать, читать или диагностировать код.
 
 ## Build & Test Commands
 
@@ -9,123 +9,53 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cargo build
 cargo build --release
 
-# Test
-cargo test                          # Run all tests
-cargo test --test unit              # Run unit tests only
-cargo test --test e2e               # Run e2e tests only
-cargo test test_name                # Run single test
+# Test all
+cargo test                          # 66 тестов (unit + e2e)
+cargo test --test unit              # Unit tests only
+cargo test --test e2e               # E2E tests only
+cargo test test_name                # Single test
 
 # Lint & Format
-cargo fmt
-cargo clippy
+cargo fmt && cargo clippy
 
-# Run server
-cargo run -- serve                          # Default mode (from config.toml)
-cargo run -- serve --mode stdio             # stdio mode for Claude Desktop
-cargo run -- serve --mode http --port 8080  # HTTP mode
-cargo run -- serve --mode http --poll       # HTTP with background polling
-
-# Direct binary
-./target/release/news-mcp serve --mode http --port 9090 --poll
+# Run (из корня репозитория)
+cargo run -- serve -c config.example.toml          # С конфигом
+cargo run -- serve -c ~/.hermes/news-mcp.toml      # Production config
 ```
 
-## Architecture Overview
+## Ключевая архитектурная особенность
 
-This is a Rust MCP (Model Context Protocol) server that fetches news from RSS feeds.
+**Poller НЕ блокирует старт сервера.** Cache пуст при запуске. Первое заполнение — через `poller.interval_secs` (по умолчанию 3600с = 1 час).
 
-### Core Components
+Не спрашивай «почему пусто?» — подожди цикла опроса или проверь `get_categories` на наличие статей.
 
-**Cache Layer** (`src/cache/news_cache.rs`)
-- Thread-safe in-memory cache using `RwLock<HashMap<...>>`
-- Stores `NewsArticle` structs by `NewsCategory`
-- Supports search across title/description
+Подробная архитектура: [ARCHITECTURE.md](ARCHITECTURE.md)
 
-**Poller** (`src/poller/news_poller.rs`)
-- Background task that polls RSS feeds at configured intervals
-- `initial_poll_completed` AtomicBool tracks first poll status
-- `wait_for_initial_poll()` blocks until cache is populated
+## Доступные MCP-тулы (текущая версия)
 
-**Server** (`src/server/`)
-- `NewsMcpServer`: Core server struct with config, cache, tool_registry
-- `NewsMcpHandler`: Implements MCP protocol handlers
-- Transport modes: stdio, HTTP, SSE, hybrid (configured in `config.toml`)
+- `get_news` — статьи по категории из кеша
+- `get_categories` — список категорий с количеством статей
+- `get_article_content` — полный текст статьи по ID
 
-**Tools** (`src/tools/`)
-- `get_news`: Fetch articles by category from cache
-- `search_news`: Search articles by keyword
-- `get_categories`: List available categories with counts
-- `health_check`: Server status and cache stats
-- `refresh_news`: Manual cache refresh trigger
+## Custom-категории из TOML-конфига
 
-**Service** (`src/service/news_service.rs`)
-- `NewsService`: HTTP client with retry middleware for fetching RSS feeds
-- Uses `feed-rs` for RSS/Atom parsing
+Категории из секции `[feeds.*]` в news-mcp.toml маппятся в `NewsCategory::Custom(String)`. Они отображаются в get_categories и доступны через get_news после первого цикла опроса.
 
-### Key Flows
+## Логи
 
-1. **Server Startup** (`src/cli/serve_cmd.rs`)
-   - Load config → Create cache → Start poller (if enabled) → Wait for initial poll → Start transport
+Логи пишутся в stderr (`.with_writer(std::io::stderr)` в `src/utils/mod.rs`). Stdio — только JSON-RPC. Это важно: если бинарник вдруг начнёт писать логи в stdout — Hermes сломается (ожидает JSON-RPC, получает ANSI-текст).
 
-2. **MCP Tool Execution** (`src/server/handler/standard.rs`)
-   - Handler receives request → ToolRegistry dispatches to tool → Tool reads from cache → Returns result
+## Деплой
 
-3. **Background Polling**
-   - Poller fetches all categories concurrently → Parses RSS → Updates cache → Sets `initial_poll_completed`
+- Бинарь: `~/go/bin/news-mcp` (через `cargo build --release && cp target/release/news-mcp ~/go/bin/`)
+- Конфиг: `~/.hermes/news-mcp.toml`
+- После смены конфига или бинаря: `systemctl --user restart hermes-gateway`
+- Проверка: `ps aux | grep news-mcp`
 
-### Configuration
+## Распространённые ошибки
 
-`config.toml` controls server behavior:
-```toml
-[server]
-transport_mode = "http"  # stdio | http | sse | hybrid
-port = 8080
-
-[poller]
-interval_secs = 3600
-enabled = true
-
-[cache]
-max_articles_per_category = 100
-```
-
-### Testing Structure
-
-- `tests/unit/`: Cache, config, service, tool tests
-- `tests/e2e/`: Transport mode integration tests
-- Uses `wiremock` for HTTP mocking, `tempfile` for config tests
-
-### RSS Feed Sources
-
-Currently configured feeds (see `src/utils/mod.rs`):
-
-**Technology**: TechCrunch, Ars Technica, The Verge
-**Science**: ScienceDaily
-
-**China News Categories** (21 categories from chinanews.com.cn):
-- instant (Instant News)
-- headlines (Headlines)
-- politics (Politics)
-- eastwest (East-West Dialogue)
-- society (Society)
-- finance (Finance)
-- life (Life)
-- wellness (Health)
-- greaterbayarea (Greater Bay Area)
-- chinese (Overseas Chinese)
-- video (Video)
-- photo (Photo)
-- creative (Creative)
-- live (Live)
-- education (Education)
-- law (Law)
-- unitedfront (United Front)
-- ethnicunity (Ethnic Unity)
-- beltandroad (Belt and Road)
-- theory (Theory)
-- asean (ASEAN Trade)
-
-### MCP Protocol Notes
-
-- HTTP mode requires session initialization before tool calls
-- Session ID returned in `initialize` response must be included in subsequent requests via `mcp-session-id` header
-- Health endpoint available at `GET /health` when using HTTP transport
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| "No articles found" после старта | Poller начнёт опрос через 3600с | Подождать или проверить позже |
+| keepalive failure | Бинарй пишет логи в stdout | Проверить `with_writer(std::io::stderr)` |
+| `Custom(String)` не отображается | Категория ещё не опрошена | Дождаться poll-цикла |

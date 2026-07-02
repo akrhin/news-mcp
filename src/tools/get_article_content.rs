@@ -33,7 +33,7 @@ const HOT_SEARCH_SOURCES: &[&str] = &[
 #[macros::mcp_tool(
     name = "get_article_content",
     title = "Get Article Content",
-    description = "Fetches full article content by article ID. Use this after browsing news headlines with get_news to deep-read selected articles. NOTE: Hot search / trending topics (微博热搜, 百度热搜, 知乎热榜, 抖音热点, B站热搜, 贴吧热议, 今日头条, 华尔街见闻, 财联社热门, 澎湃新闻, 凤凰网) do NOT support content fetching — they are social platform trends, not full articles. Only works for RSS-based news sources (Technology, Science, China News, etc.). First fetch performs HTTP request; subsequent calls return cached content instantly.",
+    description = "Fetches full article content by article ID. Use this after browsing news headlines with get_news to deep-read selected articles. NOTE: Hot search / trending topics do not support content fetching — they are social platform trends, not full articles. Only works for RSS-based news sources (Technology, Science, China News, etc.). First fetch performs HTTP request; subsequent calls return cached content instantly.",
     destructive_hint = false,
     idempotent_hint = true,
     open_world_hint = true,
@@ -175,6 +175,9 @@ impl Tool for GetArticleContentToolImpl {
 
         let format = params.format.unwrap_or_else(|| "markdown".to_string());
 
+        // Resolve max chars from config
+        let max_chars = self.fetch_config.max_chars;
+
         // Look up article by ID in news cache
         let article = self
             .news_cache
@@ -203,10 +206,21 @@ impl Tool for GetArticleContentToolImpl {
         if let Ok(Some(cached_article)) = self.article_cache.get(&article.link) {
             debug!("Returning cached content for article ID: {}", id);
 
+            // Truncate content if needed
+            let mut truncated_article = cached_article.clone();
+            if truncated_article.content.len() > max_chars {
+                truncated_article.content = format!(
+                    "{}…\n\n_[truncated — {} chars; full article: {} chars total]_",
+                    &truncated_article.content[..max_chars],
+                    max_chars,
+                    cached_article.content.len(),
+                );
+            }
+
             let output = match format.as_str() {
-                "json" => Self::format_as_json(&article, &cached_article, true),
-                "text" => Self::format_as_text(&article, &cached_article, true),
-                _ => Self::format_as_markdown(&article, &cached_article, true),
+                "json" => Self::format_as_json(&article, &truncated_article, true),
+                "text" => Self::format_as_text(&article, &truncated_article, true),
+                _ => Self::format_as_markdown(&article, &truncated_article, true),
             };
 
             return Ok(CallToolResult::text_content(vec![output.into()]));
@@ -251,10 +265,20 @@ impl Tool for GetArticleContentToolImpl {
         );
 
         // Format output
+        let mut display_article = cached_article.clone();
+        if display_article.content.len() > max_chars {
+            display_article.content = format!(
+                "{}…\n\n_[truncated — {} chars; full article: {} chars total]_",
+                &display_article.content[..max_chars],
+                max_chars,
+                cached_article.content.len(),
+            );
+        }
+
         let output = match format.as_str() {
-            "json" => Self::format_as_json(&article, &cached_article, false),
-            "text" => Self::format_as_text(&article, &cached_article, false),
-            _ => Self::format_as_markdown(&article, &cached_article, false),
+            "json" => Self::format_as_json(&article, &display_article, false),
+            "text" => Self::format_as_text(&article, &display_article, false),
+            _ => Self::format_as_markdown(&article, &display_article, false),
         };
 
         Ok(CallToolResult::text_content(vec![output.into()]))
