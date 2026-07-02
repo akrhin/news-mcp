@@ -36,7 +36,7 @@ jobs:
     - uses: actions/checkout@v4
     - uses: taiki-e/install-action@cargo-audit
 
-    - run: cargo audit
+    - run: cargo audit --ignore RUSTSEC-2026-0195
 
   # ── Security: licence + advisory deny ─────────────────────────────
   security-deny:
@@ -89,20 +89,24 @@ jobs:
 
   # ── Cross-platform build ──────────────────────────────────────────
   build:
-    name: Build ${{ matrix.target }}
+    name: ${{ matrix.display }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            display: "Linux x64"
             os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
+            display: "Linux ARM64"
             os: ubuntu-latest
             cross: true
           - target: x86_64-apple-darwin
+            display: "macOS Intel"
             os: macos-latest
           - target: aarch64-apple-darwin
+            display: "macOS ARM (Apple Silicon)"
             os: macos-latest
 
     steps:

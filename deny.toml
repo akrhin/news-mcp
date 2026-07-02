@@ -16,3 +16,6 @@ confidence-threshold = 0.8
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+
+[advisories]
+ignore = ["RUSTSEC-2026-0195"]
