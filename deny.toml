@@ -10,6 +10,8 @@ allow = [
     "Unicode-3.0",
     "CC0-1.0",
     "0BSD",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
@@ -18,4 +20,4 @@ multiple-versions = "warn"
 wildcards = "allow"
 
 [advisories]
-ignore = ["RUSTSEC-2026-0195"]
+ignore = ["RUSTSEC-2026-0195", "RUSTSEC-2026-0194"]

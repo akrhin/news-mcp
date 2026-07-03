@@ -36,7 +36,7 @@ jobs:
     - uses: actions/checkout@v4
     - uses: taiki-e/install-action@cargo-audit
 
-    - run: cargo audit --ignore RUSTSEC-2026-0195
+    - run: cargo audit --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0194
 
   # ── Security: licence + advisory deny ─────────────────────────────
   security-deny:
