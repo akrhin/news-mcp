@@ -1,22 +1,39 @@
 # News MCP Server
 
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/akrhin/news-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/akrhin/news-mcp/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Fork](https://img.shields.io/badge/fork-KingingWang/news--mcp-blueviolet)](https://github.com/KingingWang/news-mcp)
 
-> **Форк** [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — MCP-сервер на Rust для получения новостей из RSS-лент.
+> **Личный форк** [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — MCP-сервер на Rust
+> для получения новостей из RSS-лент.  
+> Сделан под [Hermes Agent](https://hermes-agent.nousresearch.com) / Claude Desktop с фокусом на
+> мониторинг CVE/security-лент, компактный вывод для AI и полностью настраиваемые источники.
 
 **🇬🇧 English: [README.md](README.md)**
 
 ---
 
-## Что добавляет этот форк
+## Зачем этот форк
 
-- **Пользовательские категории** — добавьте любую RSS-ленту как новую категорию через `config.toml`; не нужно перекомпилировать
+Оригинальный [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — хорошая основа, но он
+поставляется с 40+ жёстко зашитыми категориями (China News, NewsNow hot lists), большинство из которых
+бесполезны для мониторинга CVE. Этот форк переориентирует проект на **минимальный расход контекста AI**
+и **полностью настраиваемый мониторинг CVE / security-лент**.
+
+### Что добавляет этот форк
+
+- **Компактный AI-вывод** — формат `compact` для `get_news`: одна строка на статью (заголовок, источник,
+  дата, ссылка) вместо многострочного markdown; сокращение расхода контекста в 3–5×
+- **Обрезка статей** — `get_article_content` обрезает длинный текст до настраиваемого `max_chars`
+  (по умолч. 2000), чтобы большие статьи не забивали контекст LLM
+- **Пользовательские категории** — добавьте любую RSS-ленту как новую категорию через `config.toml`
 - **Настройка через конфиг** — все URL-адреса лент живут в конфигурации, а не в коде
-- **CVE и Security пресеты** — встроенные примеры для лент CISA, The Hacker News, OpenNET, Debian, Ubuntu, Red Hat
-- **Динамическая схема инструментов** — `get_news` и `get_categories` автоматически обнаруживают пользовательские категории
+- **CVE и Security пресеты** — готовые конфиги для CISA, The Hacker News, OpenNET, Debian, Ubuntu, Red Hat
+- **Динамическая схема инструментов** — `get_news` и `get_categories` автоматически находят пользовательские категории
 - **Без блокировки при старте** — сервер запускается сразу, кеш заполняется на первом цикле опроса
+- **Контроль зависимостей** — поддерживает [форк `feed-rs`](https://github.com/akrhin/feed-rs)
+  с актуальными версиями зависимостей (quick-xml 0.41+) чтобы избежать RUSTSEC-предупреждений
 
 ## Возможности
 
@@ -145,7 +162,7 @@ flowchart LR
 
 ### get_news
 
-Получение статей по категории. Параметры: `category` (строка), `limit` (1–50, по умолч. 10), `format` (markdown|json|text).
+Получение статей по категории. Параметры: `category` (строка), `limit` (1–50, по умолч. 10), `format` (markdown|json|text|compact).
 
 ```json
 {"category": "technology", "limit": 5, "format": "markdown"}
@@ -159,7 +176,7 @@ flowchart LR
 
 Полный текст статьи по ID. Работает только для RSS-источников, не для горячих списков.
 
-**Параметры:** `id` (строка), `format` (markdown|json|text).
+**Параметры:** `id` (строка), `format` (markdown|json|text). Обрезка текста настраивается через `max_chars` в `config.toml` (по умолч. 2000).
 
 ## Категории
 

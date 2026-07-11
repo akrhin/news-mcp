@@ -1,22 +1,39 @@
 # News MCP Server
 
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/akrhin/news-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/akrhin/news-mcp/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Fork](https://img.shields.io/badge/fork-KingingWang/news--mcp-blueviolet)](https://github.com/KingingWang/news-mcp)
 
-> **Fork** of [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — a Rust-based MCP server for fetching news from RSS feeds.
+> **Personal fork** of [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) — a Rust MCP server for fetching news from RSS feeds.  
+> Built for [Hermes Agent](https://hermes-agent.nousresearch.com) / Claude Desktop integration with
+> CVE/security feed monitoring, compact AI-friendly output, and fully configurable sources.
 
 **🇷🇺 Русская версия: [README_RU.md](README_RU.md)**
 
 ---
 
-## What This Fork Adds
+## Why This Fork Exists
 
-- **Custom categories** — add any RSS feed as a new category via `config.toml`; no code changes needed
+The original [KingingWang/news-mcp](https://github.com/KingingWang/news-mcp) is a great base, but it ships 40+
+hardcoded feed categories including China News and NewsNow hot lists — most of which are irrelevant for a
+security-focused CVE monitoring setup. This fork reorients the project around **minimal context overhead** for AI
+assistants and **fully configurable CVE / security feed monitoring**.
+
+### What This Fork Adds
+
+- **Compact AI output** — a `compact` format for `get_news` that emits one line per article (title, source, date, link)
+  instead of multi-line markdown, reducing LLM context cost by 3–5×
+- **Configurable article truncation** — `get_article_content` truncates to a configurable `max_chars` (default 2000)
+  to prevent long articles from flooding LLM context
+- **Custom feed categories** — add any RSS feed as a new category via `config.toml`; no code changes needed
 - **Config-driven sources** — all feed URLs live in config, not in enum variants
-- **CVE & security presets** — built-in example configs for CISA, The Hacker News, OpenNET, Debian, Ubuntu, Red Hat security feeds
+- **CVE & security presets** — built-in example configs for CISA, The Hacker News, OpenNET, Debian, Ubuntu,
+  Red Hat security feeds
 - **Dynamic tool schema** — `get_news` and `get_categories` auto-discover custom categories from cache
 - **No startup blocking** — server starts immediately; cache fills on first poll tick
+- **Upstream dependency hardening** — maintains a [fork of `feed-rs`](https://github.com/akrhin/feed-rs) with
+  up-to-date dependency versions (quick-xml 0.41+) to avoid RUSTSEC advisories in transient deps
 
 ## Features
 
@@ -154,7 +171,7 @@ Three layers:
 
 ### get_news
 
-Fetch articles by category. Parameters: `category` (string), `limit` (1–50, default 10), `format` (markdown|json|text).
+Fetch articles by category. Parameters: `category` (string), `limit` (1–50, default 10), `format` (markdown|json|text|compact).
 
 ```json
 {"category": "technology", "limit": 5, "format": "markdown"}
@@ -168,7 +185,7 @@ List all available categories (built-in + custom) with article counts.
 
 Fetch full article content by article ID. Only works for RSS-based sources, not for hot search / trending topics.
 
-**Parameters:** `id` (string), `format` (markdown|json|text).
+**Parameters:** `id` (string), `format` (markdown|json|text). Content truncation is configured via `max_chars` in `config.toml` (default 2000).
 
 ## Categories
 
